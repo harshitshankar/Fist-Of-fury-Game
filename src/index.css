@@ -1,0 +1,77 @@
+@import "tailwindcss";
+
+html,
+body {
+  margin: 0;
+  background: #0a0a2e;
+  -webkit-tap-highlight-color: transparent;
+  font-family: system-ui, "Segoe UI", Roboto, sans-serif;
+}
+
+#root {
+  min-height: 100%;
+}
+
+/* Lock scrolling ONLY while a match is on-screen (toggled by GameScreen).
+   The lobby and waiting room scroll normally. */
+body.no-scroll {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+@keyframes victoryIn {
+  0% {
+    transform: scale(0.3) rotate(-8deg);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.15) rotate(2deg);
+  }
+  100% {
+    transform: scale(1) rotate(0deg);
+    opacity: 1;
+  }
+}
+
+@keyframes confettiFall {
+  0% {
+    transform: translateY(-10px) rotate(0deg);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(110vh) rotate(720deg);
+    opacity: 0.2;
+  }
+}
+
+@keyframes spinSlow {
+  from {
+    transform: rotate(-15deg);
+  }
+  to {
+    transform: rotate(90deg);
+  }
+}
+.animate-spin-slow {
+  animation: spinSlow 1.6s ease-in-out infinite alternate;
+}
+
+/* Show the rotate hint only on portrait phones (height > width, small screens) */
+@media (orientation: portrait) and (max-width: 820px) {
+  .rotate-hint {
+    display: flex !important;
+  }
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-thumb {
+  background: #f9731680;
+  border-radius: 3px;
+}

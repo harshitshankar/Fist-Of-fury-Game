@@ -1,0 +1,14 @@
+# Render.com Blueprint — deploy Fist of Fury as ONE web service.
+# Push this repo to GitHub, then in Render: New + > Blueprint > pick this repo.
+services:
+  - type: web
+    name: fist-of-fury
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: node server.js
+    envVars:
+      - key: NODE_VERSION
+        value: 20.11.0
+    autoDeploy: true
+    healthCheckPath: /health
