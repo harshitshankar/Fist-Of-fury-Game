@@ -361,45 +361,56 @@ export default function GameScreen(props: Props) {
         />
       )}
 
-      {/* End-of-match overlay — celebration ONLY when YOU win */}
+      {/* End-of-match overlay — celebration ONLY when YOU win.
+          Scrollable + compact so the BACK button is always reachable, even on
+          short landscape phone screens. */}
       {victory && (
-        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center">
-          <div className="absolute inset-0 bg-gradient-to-b from-black/50 via-black/30 to-black/80" />
-          <div className="relative animate-[victoryIn_0.6s_ease-out] text-center">
+        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center overflow-y-auto py-3">
+          <div className="absolute inset-0 bg-gradient-to-b from-black/55 via-black/35 to-black/85" />
+
+          {/* Always-visible BACK button pinned to the top-right as a guaranteed exit */}
+          <button
+            onClick={props.onExit}
+            className="absolute right-3 top-3 z-10 rounded-lg bg-red-600 px-4 py-2 text-sm font-black text-white shadow-lg active:scale-95"
+          >
+            ⬅ LOBBY
+          </button>
+
+          <div className="relative my-auto animate-[victoryIn_0.6s_ease-out] px-3 text-center">
             {victory.winner === "p1" ? (
               <>
-                <div className="text-2xl font-bold tracking-[0.3em] text-yellow-300 sm:text-4xl">
+                <div className="text-lg font-bold tracking-[0.25em] text-yellow-300 sm:text-3xl">
                   🏆 YOU WIN 🏆
                 </div>
-                <div className="mt-2 bg-gradient-to-r from-yellow-300 via-orange-400 to-red-500 bg-clip-text text-6xl font-black text-transparent drop-shadow-[0_0_40px_rgba(255,150,0,0.9)] sm:text-8xl">
+                <div className="bg-gradient-to-r from-yellow-300 via-orange-400 to-red-500 bg-clip-text text-4xl font-black text-transparent drop-shadow-[0_0_30px_rgba(255,150,0,0.9)] sm:text-7xl">
                   VICTORY MATE!
                 </div>
-                <div className="mt-2 text-xl font-bold text-white sm:text-3xl">
+                <div className="text-base font-bold text-white sm:text-2xl">
                   {victory.name} is the champion
                 </div>
               </>
             ) : (
               <>
-                <div className="text-3xl font-black tracking-[0.2em] text-red-400 sm:text-5xl">
+                <div className="text-2xl font-black tracking-[0.2em] text-red-400 sm:text-5xl">
                   💀 DEFEATED 💀
                 </div>
-                <div className="mt-3 text-xl font-bold text-white/80 sm:text-3xl">
+                <div className="mt-1 text-base font-bold text-white/80 sm:text-2xl">
                   {victory.name} won the match
                 </div>
-                <div className="mt-1 text-base font-semibold text-white/50 sm:text-xl">
+                <div className="text-sm font-semibold text-white/50 sm:text-xl">
                   Better luck next time!
                 </div>
               </>
             )}
             {totalRounds > 1 && (
-              <div className="mt-3 text-lg font-black text-orange-300">
+              <div className="mt-1.5 text-sm font-black text-orange-300 sm:text-lg">
                 Final Score — {props.p1Name}: {roundWins.p1} &nbsp;•&nbsp; {props.p2Name}: {roundWins.p2}
               </div>
             )}
-            <div className="mt-8 flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
+            <div className="mt-4 flex justify-center">
               <button
                 onClick={props.onExit}
-                className="rounded-xl bg-gradient-to-r from-orange-500 to-red-600 px-8 py-3 text-lg font-black text-white shadow-lg active:scale-95"
+                className="rounded-xl bg-gradient-to-r from-orange-500 to-red-600 px-10 py-3 text-base font-black text-white shadow-lg active:scale-95 sm:text-lg"
               >
                 ⬅ BACK TO LOBBY
               </button>
