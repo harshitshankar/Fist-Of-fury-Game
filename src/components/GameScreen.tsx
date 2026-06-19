@@ -43,6 +43,7 @@ export default function GameScreen(props: Props) {
 
   const [specialReady, setSpecialReady] = useState(false);
   const [weaponState, setWeaponState] = useState({ equipped: true, thrown: false });
+  const [clashing, setClashing] = useState(false);
   const [victory, setVictory] = useState<null | { winner: "p1" | "p2"; name: string }>(null);
   const [ready, setReady] = useState(false);
   const [intro, setIntro] = useState(true);
@@ -184,7 +185,8 @@ export default function GameScreen(props: Props) {
       setSpecialReady(e.p1.meter >= 50);
       // weapon button states driven by the engine
       setWeaponState({ equipped: e.p1.weaponEquipped, thrown: e.p1.weaponThrown });
-    }, 100);
+      setClashing(!!e.beamClash && !e.beamClash.resolved);
+    }, 80);
 
     // network state push
     let netInt: any;
@@ -346,6 +348,18 @@ export default function GameScreen(props: Props) {
             <div className="bg-gradient-to-r from-yellow-300 via-orange-400 to-red-500 bg-clip-text text-4xl font-black text-transparent drop-shadow-[0_0_24px_rgba(255,150,0,0.8)] sm:text-6xl">
               {roundBanner}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* BEAM CLASH — mash prompt */}
+      {clashing && (
+        <div className="absolute inset-x-0 top-16 z-40 flex flex-col items-center pointer-events-none">
+          <div className="animate-pulse text-3xl font-black text-white drop-shadow-[0_0_20px_rgba(255,255,255,0.9)] sm:text-5xl">
+            ⚡ MASH! ⚡
+          </div>
+          <div className="mt-1 text-sm font-bold text-yellow-300 sm:text-lg">
+            Tap PUNCH / SPECIAL fast to win the clash!
           </div>
         </div>
       )}

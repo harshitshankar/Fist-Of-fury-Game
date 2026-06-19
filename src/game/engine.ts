@@ -134,6 +134,21 @@ interface ThrownWeapon {
   life: number;
 }
 
+// A BEAM CLASH: two opposing special beams collide and a glowing orb forms at
+// the meeting point. Each player mashes their SPECIAL/PUNCH button to push the
+// clash toward the opponent. The loser (whose side the orb reaches) takes a big
+// hit + knockback.
+interface BeamClash {
+  x: number;          // current clash-orb x (the contested point)
+  y: number;          // clash height
+  p1Beam: Beam;       // p1's beam
+  p2Beam: Beam;       // p2's beam
+  p1Power: number;    // accumulated mash power for p1
+  p2Power: number;    // accumulated mash power for p2
+  time: number;       // elapsed frames
+  resolved: boolean;
+}
+
 const WORLD = { w: 1280, h: 600 };
 const GROUND_Y = 480;
 const GRAVITY = 0.9;
@@ -162,6 +177,8 @@ export class FightEngine {
   particles: Particle[] = [];
   beams: Beam[] = [];
   thrownWeapons: ThrownWeapon[] = [];
+  beamClash: BeamClash | null = null; // active beam clash (button-smash mini-game)
+  prevInput: InputState = { ...EMPTY_INPUT }; // last frame's input (edge detection)
   texts: FloatingText[] = [];
   input: InputState = { ...EMPTY_INPUT };
   remoteInput: InputState = { ...EMPTY_INPUT };
@@ -333,6 +350,26 @@ export class FightEngine {
         this.endRound(w);
       }
     }
+
+    // During a BEAM CLASH, button presses push the clash orb instead of
+    // performing normal actions (rapid PUNCH/SPECIAL/KICK taps = mash power).
+    if (this.beamClash && !this.beamClash.resolved) {
+      const i = this.input;
+      const p = this.prevInput;
+      const pressed =
+        (i.punch && !p.punch) ||
+        (i.special && !p.special) ||
+        (i.kick && !p.kick);
+      if (pressed) this.pushClash("p1", 6);
+      this.prevInput = { ...i };
+      this.updateParticles(step);
+      this.updateTexts(dt);
+      this.updateBeams(step); // advances/ resolves the clash
+      this.p1.animTime += step;
+      this.p2.animTime += step;
+      return; // freeze normal control while clashing
+    }
+    this.prevInput = { ...this.input };
 
     // P1 controlled by local input
     this.controlFighter(this.p1, this.p2, this.input, step, "p1");
@@ -814,9 +851,57 @@ export class FightEngine {
     });
   }
 
+  // Two thrown weapons smash into each other mid-air: shower of metallic
+  // sparks, a bright ricochet flash, and a clang.
+  weaponClash(x: number, y: number, wa: ThrownWeapon, wb: ThrownWeapon) {
+    const ca = getWeapon(wa.fighterId).trail;
+    const cb = getWeapon(wb.fighterId).trail;
+    // burst of sparks shooting outward
+    for (let i = 0; i < 50; i++) {
+      const ang = Math.random() * Math.PI * 2;
+      const sp = 4 + Math.random() * 14;
+      this.particles.push({
+        x, y,
+        vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp,
+        life: 16 + Math.random() * 22, maxLife: 38,
+        color: [ca, cb, "#ffffff", "#ffd23b"][Math.floor(Math.random() * 4)],
+        size: 2 + Math.random() * 6,
+      });
+    }
+    // bright ring flash
+    for (let i = 0; i < 18; i++) {
+      const ang = (i / 18) * Math.PI * 2;
+      this.particles.push({
+        x, y,
+        vx: Math.cos(ang) * 10, vy: Math.sin(ang) * 10,
+        life: 14, maxLife: 14, color: "#ffffff", size: 5,
+      });
+    }
+    this.texts.push({ x, y: y - 40, text: "CLANG!", life: 45, color: "#ffd23b", size: 30 });
+    this.shakeMag = Math.max(this.shakeMag, 18);
+    this.hitFlash = Math.max(this.hitFlash, 0.6);
+    Sfx.block();
+    setTimeout(() => Sfx.hit(), 40);
+  }
+
   updateThrownWeapons(step: number) {
     const targetFor = (o: "p1" | "p2") => (o === "p1" ? this.p2 : this.p1);
     const ownerFor = (o: "p1" | "p2") => (o === "p1" ? this.p1 : this.p2);
+
+    // ---- WEAPON CLASH: two opposing thrown weapons collide mid-air ----
+    for (let a = 0; a < this.thrownWeapons.length; a++) {
+      for (let b = a + 1; b < this.thrownWeapons.length; b++) {
+        const wa = this.thrownWeapons[a];
+        const wb = this.thrownWeapons[b];
+        if (wa.owner === wb.owner || wa.hit || wb.hit) continue;
+        if (Math.abs(wa.x - wb.x) < 44 && Math.abs(wa.y - wb.y) < 44) {
+          this.weaponClash((wa.x + wb.x) / 2, (wa.y + wb.y) / 2, wa, wb);
+          wa.hit = true; wb.hit = true;
+          wa.life = 0; wb.life = 0;
+        }
+      }
+    }
+
     for (let i = this.thrownWeapons.length - 1; i >= 0; i--) {
       const tw = this.thrownWeapons[i];
       tw.x += tw.vx * step;
@@ -863,6 +948,19 @@ export class FightEngine {
   updateBeams(step: number) {
     const targetFor = (owner: "p1" | "p2") => (owner === "p1" ? this.p2 : this.p1);
     const ownerFor = (owner: "p1" | "p2") => (owner === "p1" ? this.p1 : this.p2);
+
+    // ---- BEAM CLASH DETECTION: two opposing beams meeting head-on ----
+    if (!this.beamClash) {
+      const p1b = this.beams.find((b) => b.owner === "p1" && !b.hit);
+      const p2b = this.beams.find((b) => b.owner === "p2" && !b.hit);
+      if (p1b && p2b && Math.abs(p1b.x - p2b.x) < 70 && Math.abs(p1b.y - p2b.y) < 80) {
+        this.startBeamClash(p1b, p2b);
+      }
+    }
+    if (this.beamClash) {
+      this.updateBeamClash(step);
+      return; // clash takes over beam movement
+    }
 
     for (let i = this.beams.length - 1; i >= 0; i--) {
       const b = this.beams[i];
@@ -932,6 +1030,102 @@ export class FightEngine {
         color: palette[Math.floor(Math.random() * palette.length)],
         size: 5 + Math.random() * 14,
       });
+    }
+  }
+
+  // ---- BEAM CLASH (button-smash) ----
+  startBeamClash(p1b: Beam, p2b: Beam) {
+    const cx = (p1b.x + p2b.x) / 2;
+    const cy = (p1b.y + p2b.y) / 2;
+    this.beamClash = {
+      x: cx,
+      y: cy,
+      p1Beam: p1b,
+      p2Beam: p2b,
+      p1Power: 0,
+      p2Power: 0,
+      time: 0,
+      resolved: false,
+    };
+    this.shakeMag = 14;
+    this.hitFlash = 0.5;
+    this.texts.push({ x: cx, y: cy - 70, text: "CLASH!", life: 50, color: "#ffffff", size: 40 });
+    this.beamExplosion(cx, cy, p1b.color, p2b.color, "#ffffff");
+    Sfx.special();
+  }
+
+  // Called when a player taps SPECIAL/PUNCH during a clash to push the orb.
+  pushClash(who: "p1" | "p2", amount = 1) {
+    if (!this.beamClash || this.beamClash.resolved) return;
+    if (who === "p1") this.beamClash.p1Power += amount;
+    else this.beamClash.p2Power += amount;
+  }
+
+  updateBeamClash(step: number) {
+    const c = this.beamClash!;
+    c.time += step;
+
+    // CPU auto-mashes during a clash (offline). Online: each client mashes for
+    // its own p1 via pushClash(); the loser is decided by the local sim.
+    if (!this.isOnline) {
+      // CPU strength scales a bit so it's a real contest
+      c.p2Power += (0.5 + Math.random() * 0.9) * step;
+    }
+    // gentle decay so the orb naturally drifts toward whoever stops mashing
+    const diff = (c.p1Power - c.p2Power) * 0.12;
+    c.x += diff * step;
+    c.y = (this.p1.y + this.p2.y) / 2 + 48;
+
+    // keep both beams anchored to the clash point
+    c.p1Beam.x = c.x;
+    c.p2Beam.x = c.x;
+    c.p1Beam.life = Math.max(c.p1Beam.life, 4);
+    c.p2Beam.life = Math.max(c.p2Beam.life, 4);
+
+    // sparks flying from the contested orb
+    for (let k = 0; k < 3; k++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = 3 + Math.random() * 8;
+      this.particles.push({
+        x: c.x, y: c.y,
+        vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+        life: 10 + Math.random() * 14, maxLife: 24,
+        color: Math.random() < 0.5 ? c.p1Beam.color : c.p2Beam.color,
+        size: 3 + Math.random() * 6,
+      });
+    }
+    this.shakeMag = Math.max(this.shakeMag, 6);
+
+    // resolve when the orb reaches a fighter OR after a max duration
+    const p1Lost = c.x <= this.p1.x + FIGHTER_W * 0.7;
+    const p2Lost = c.x >= this.p2.x - FIGHTER_W * 0.7;
+    const timeout = c.time > 240;
+
+    if ((p1Lost || p2Lost || timeout) && !c.resolved) {
+      c.resolved = true;
+      let winner: "p1" | "p2";
+      if (p2Lost) winner = "p1";
+      else if (p1Lost) winner = "p2";
+      else winner = c.p1Power >= c.p2Power ? "p1" : "p2";
+
+      const loser = winner === "p1" ? this.p2 : this.p1;
+      const champ = winner === "p1" ? this.p1 : this.p2;
+      // huge clash explosion
+      this.beamExplosion(loser.x, loser.y + 48, c.p1Beam.color, c.p2Beam.color, "#ffffff");
+      this.beamExplosion(loser.x, loser.y + 48, "#ffffff", c.p1Beam.color, c.p2Beam.color);
+      this.shakeMag = 30;
+      this.hitFlash = 1;
+      this.texts.push({
+        x: champ.x, y: champ.y - 30,
+        text: "CLASH WIN!", life: 60, color: "#ffd23b", size: 34,
+      });
+      // big damage + launch to the loser (online: only local owner applies/sends)
+      if (!this.isOnline || winner === "p1") {
+        this.applyDamage(loser, champ, 30, winner, true);
+      }
+      // remove the clashing beams
+      this.beams = this.beams.filter((b) => b !== c.p1Beam && b !== c.p2Beam);
+      this.beamClash = null;
     }
   }
 
@@ -1136,6 +1330,7 @@ export class FightEngine {
     this.drawFighter(ctx, this.p1, this.p1Fighter);
     this.drawBeams(ctx);
     this.drawThrownWeapons(ctx);
+    this.drawBeamClash(ctx);
     this.drawParticles(ctx);
     this.drawTexts(ctx);
 
@@ -2276,6 +2471,55 @@ export class FightEngine {
         ctx.beginPath(); ctx.moveTo(0, -3); ctx.lineTo(len, 0); ctx.lineTo(0, 3); ctx.closePath(); ctx.fill();
       }
     }
+  }
+
+  // The contested glowing orb at the center of a beam clash.
+  drawBeamClash(ctx: CanvasRenderingContext2D) {
+    const c = this.beamClash;
+    if (!c) return;
+    const c1 = c.p1Beam.color;
+    const c2 = c.p2Beam.color;
+    const pulse = 1 + 0.25 * Math.sin(this.bgTime * 3);
+    const r = (46 + Math.min(40, c.time * 0.2)) * pulse;
+
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    // outer blurred aura (blend of both colors)
+    ctx.shadowColor = "#ffffff";
+    ctx.shadowBlur = 50;
+    const g = ctx.createRadialGradient(c.x, c.y, 4, c.x, c.y, r);
+    g.addColorStop(0, "#ffffff");
+    g.addColorStop(0.4, c1);
+    g.addColorStop(0.7, c2);
+    g.addColorStop(1, "transparent");
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(c.x, c.y, r, 0, Math.PI * 2);
+    ctx.fill();
+
+    // bright white core
+    ctx.shadowBlur = 24;
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath();
+    ctx.arc(c.x, c.y, r * 0.4 * pulse, 0, Math.PI * 2);
+    ctx.fill();
+
+    // crackling lightning arcs radiating out
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 2.5;
+    ctx.shadowBlur = 14;
+    for (let k = 0; k < 7; k++) {
+      const a = this.bgTime * 0.5 + (k / 7) * Math.PI * 2;
+      const len = r * (0.9 + Math.random() * 0.5);
+      ctx.beginPath();
+      ctx.moveTo(c.x, c.y);
+      ctx.lineTo(
+        c.x + Math.cos(a) * len + (Math.random() - 0.5) * 14,
+        c.y + Math.sin(a) * len + (Math.random() - 0.5) * 14
+      );
+      ctx.stroke();
+    }
+    ctx.restore();
   }
 
   drawThrownWeapons(ctx: CanvasRenderingContext2D) {
