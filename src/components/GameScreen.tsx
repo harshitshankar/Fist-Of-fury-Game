@@ -32,6 +32,10 @@ interface Props {
   registerRemoteState?: (fn: (s: any) => void) => void;
   registerRemoteHit?: (fn: (d: any) => void) => void;
   registerRoundResult?: (fn: (d: any) => void) => void;
+  onClashDetect?: () => void;
+  onClashMash?: (power: number) => void;
+  registerClashStart?: (fn: () => void) => void;
+  registerClashResult?: (fn: (d: any) => void) => void;
   onExit: () => void;
 }
 
@@ -120,6 +124,8 @@ export default function GameScreen(props: Props) {
           const loserId = who === "self" ? myId : oppId;
           props.onReportKO?.(loserId, engine.currentRound);
         },
+        onClashDetect: () => props.onClashDetect?.(),
+        onClashMash: (power) => props.onClashMash?.(power),
       },
     });
     engineRef.current = engine;
@@ -136,6 +142,12 @@ export default function GameScreen(props: Props) {
         const oppId = Object.keys(d.score || {}).find((k) => k !== myId) || "";
         const oppRounds = d.score?.[oppId] ?? engine.p2Rounds;
         engine.applyRoundResult(localWon, myRounds, oppRounds, !!d.matchOver);
+      });
+      // Server-coordinated beam clash: both clients start & resolve identically.
+      props.registerClashStart?.(() => engine.startBeamClashOnline());
+      props.registerClashResult?.((d) => {
+        const myId = props.selfId || "";
+        engine.applyClashResult(d.winnerId === myId);
       });
     }
 

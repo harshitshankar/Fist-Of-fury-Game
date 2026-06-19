@@ -304,6 +304,45 @@ io.on("connection", (socket) => {
     }
   });
 
+  // ---- Server-coordinated BEAM CLASH (button-smash) ----
+  // A client whose beams overlapped reports "clash:detect". The server starts
+  // the clash on BOTH clients at once, collects each player's mash power, and
+  // after a fixed duration broadcasts the winner so both see the same result.
+  socket.on("clash:detect", () => {
+    if (!currentRoom) return;
+    const room = rooms.get(currentRoom);
+    if (!room || room.clashActive) return;
+    room.clashActive = true;
+    room.clashMash = {}; // socketId -> mash power
+    [...room.players.keys()].forEach((id) => (room.clashMash[id] = 0));
+
+    io.to(currentRoom).emit("clash:start");
+
+    // judge the clash after ~3 seconds of mashing
+    if (room.clashTimer) clearTimeout(room.clashTimer);
+    room.clashTimer = setTimeout(() => {
+      const ids = [...room.players.keys()];
+      let winnerId = ids[0];
+      let best = -1;
+      ids.forEach((id) => {
+        const v = room.clashMash[id] || 0;
+        if (v > best) { best = v; winnerId = id; }
+      });
+      io.to(currentRoom).emit("clash:result", { winnerId });
+      room.clashActive = false;
+      room.clashMash = {};
+    }, 3000);
+  });
+
+  socket.on("clash:mash", (power) => {
+    if (!currentRoom) return;
+    const room = rooms.get(currentRoom);
+    if (!room || !room.clashActive || !room.clashMash) return;
+    // store the highest reported power for this player
+    const v = Number(power) || 0;
+    if (v > (room.clashMash[socket.id] || 0)) room.clashMash[socket.id] = v;
+  });
+
   // ---- Chat ----
   socket.on("chat:send", (text) => {
     if (!currentRoom) return;

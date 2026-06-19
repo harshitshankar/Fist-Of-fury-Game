@@ -47,6 +47,8 @@ export function useMultiplayer() {
   const onRemoteStateRef = useRef<((s: any) => void) | null>(null);
   const onRemoteHitRef = useRef<((d: any) => void) | null>(null);
   const onRoundResultRef = useRef<((d: any) => void) | null>(null);
+  const onClashStartRef = useRef<(() => void) | null>(null);
+  const onClashResultRef = useRef<((d: any) => void) | null>(null);
 
   const [state, setState] = useState<MpState>({
     connected: false,
@@ -135,6 +137,13 @@ export function useMultiplayer() {
 
     s.on("round:result", (d: any) => {
       onRoundResultRef.current?.(d);
+    });
+
+    s.on("clash:start", () => {
+      onClashStartRef.current?.();
+    });
+    s.on("clash:result", (d: any) => {
+      onClashResultRef.current?.(d);
     });
 
     s.on("chat:msg", (m: ChatMsg) => {
@@ -254,6 +263,13 @@ export function useMultiplayer() {
     socketRef.current?.emit("round:ko", { loserId, round });
   }, []);
 
+  const clashDetect = useCallback(() => {
+    socketRef.current?.emit("clash:detect");
+  }, []);
+  const clashMash = useCallback((power: number) => {
+    socketRef.current?.emit("clash:mash", power);
+  }, []);
+
   const sendChat = useCallback((text: string) => {
     socketRef.current?.emit("chat:send", text);
   }, []);
@@ -285,6 +301,12 @@ export function useMultiplayer() {
   const setOnRoundResult = useCallback((fn: (d: any) => void) => {
     onRoundResultRef.current = fn;
   }, []);
+  const setOnClashStart = useCallback((fn: () => void) => {
+    onClashStartRef.current = fn;
+  }, []);
+  const setOnClashResult = useCallback((fn: (d: any) => void) => {
+    onClashResultRef.current = fn;
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -309,6 +331,10 @@ export function useMultiplayer() {
     setOnRemoteState,
     setOnRemoteHit,
     setOnRoundResult,
+    clashDetect,
+    clashMash,
+    setOnClashStart,
+    setOnClashResult,
     clearError: () => setState((p) => ({ ...p, error: null })),
   };
 }

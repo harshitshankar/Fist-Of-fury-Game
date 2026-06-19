@@ -164,6 +164,8 @@ export interface EngineCallbacks {
   onRoundEnd?: (winner: "p1" | "p2", p1Rounds: number, p2Rounds: number) => void;
   onRoundStart?: (round: number) => void;
   onReportKO?: (who: "self" | "opponent") => void; // online: report KO to server
+  onClashDetect?: () => void;       // online: a beam clash was detected locally
+  onClashMash?: (power: number) => void; // online: send my mash power to server
 }
 
 export class FightEngine {
@@ -178,6 +180,8 @@ export class FightEngine {
   beams: Beam[] = [];
   thrownWeapons: ThrownWeapon[] = [];
   beamClash: BeamClash | null = null; // active beam clash (button-smash mini-game)
+  clashRequested = false; // online: asked the server to start a clash (waiting)
+  clashSendTimer = 0;     // online: throttle for sending mash power to server
   prevInput: InputState = { ...EMPTY_INPUT }; // last frame's input (edge detection)
   texts: FloatingText[] = [];
   input: InputState = { ...EMPTY_INPUT };
@@ -545,6 +549,8 @@ export class FightEngine {
     reset(this.p2, 960, -1, this.p2Fighter.health);
     this.beams = [];
     this.thrownWeapons = [];
+    this.beamClash = null;
+    this.clashRequested = false;
     this.roundTimer = this.roundTime;
     this.roundOver = false;
     this.roundWinner = null;
@@ -950,11 +956,20 @@ export class FightEngine {
     const ownerFor = (owner: "p1" | "p2") => (owner === "p1" ? this.p1 : this.p2);
 
     // ---- BEAM CLASH DETECTION: two opposing beams meeting head-on ----
-    if (!this.beamClash) {
+    if (!this.beamClash && !this.clashRequested) {
       const p1b = this.beams.find((b) => b.owner === "p1" && !b.hit);
       const p2b = this.beams.find((b) => b.owner === "p2" && !b.hit);
-      if (p1b && p2b && Math.abs(p1b.x - p2b.x) < 70 && Math.abs(p1b.y - p2b.y) < 80) {
-        this.startBeamClash(p1b, p2b);
+      // Lenient distance online (network lag) so BOTH clients can detect it.
+      const range = this.isOnline ? 200 : 70;
+      if (p1b && p2b && Math.abs(p1b.x - p2b.x) < range && Math.abs(p1b.y - p2b.y) < 90) {
+        if (this.isOnline) {
+          // Don't start locally yet — ask the server to start it on BOTH clients
+          // simultaneously so the mini-game is perfectly synced.
+          this.clashRequested = true;
+          this.cb.onClashDetect?.();
+        } else {
+          this.startBeamClash(p1b, p2b);
+        }
       }
     }
     if (this.beamClash) {
@@ -1054,6 +1069,40 @@ export class FightEngine {
     Sfx.special();
   }
 
+  // ONLINE: the server tells BOTH clients to start the clash at the same time.
+  // We synthesize the clash centered between the two fighters (using each
+  // fighter's own beam if present, otherwise a fresh visual beam) so both
+  // players see and play the same mini-game regardless of network timing.
+  startBeamClashOnline() {
+    if (this.beamClash) return;
+    this.clashRequested = true;
+    let p1b = this.beams.find((b) => b.owner === "p1");
+    let p2b = this.beams.find((b) => b.owner === "p2");
+    const f1 = this.p1Fighter;
+    const f2 = this.p2Fighter;
+    const cx = (this.p1.x + this.p2.x) / 2;
+    const cy = (this.p1.y + this.p2.y) / 2 + 48;
+    if (!p1b) {
+      p1b = {
+        x: cx, y: cy, vx: this.p1.facing * 16, dir: this.p1.facing,
+        life: 999, maxLife: 999, color: f1.specialColor,
+        color2: f1.beamCore || "#ffffff", glow: f1.beamGlow || f1.specialColor,
+        width: 52, owner: "p1", dmg: 0, hit: false, fighterId: f1.id, charge: 0,
+      };
+      this.beams.push(p1b);
+    }
+    if (!p2b) {
+      p2b = {
+        x: cx, y: cy, vx: this.p2.facing * 16, dir: this.p2.facing,
+        life: 999, maxLife: 999, color: f2.specialColor,
+        color2: f2.beamCore || "#ffffff", glow: f2.beamGlow || f2.specialColor,
+        width: 52, owner: "p2", dmg: 0, hit: false, fighterId: f2.id, charge: 0,
+      };
+      this.beams.push(p2b);
+    }
+    this.startBeamClash(p1b, p2b);
+  }
+
   // Called when a player taps SPECIAL/PUNCH during a clash to push the orb.
   pushClash(who: "p1" | "p2", amount = 1) {
     if (!this.beamClash || this.beamClash.resolved) return;
@@ -1070,6 +1119,14 @@ export class FightEngine {
     if (!this.isOnline) {
       // CPU strength scales a bit so it's a real contest
       c.p2Power += (0.5 + Math.random() * 0.9) * step;
+    } else {
+      // ONLINE: stream my mash power to the server a few times/sec so it can
+      // judge the winner fairly from BOTH players' taps.
+      this.clashSendTimer = (this.clashSendTimer || 0) - step;
+      if (this.clashSendTimer <= 0) {
+        this.clashSendTimer = 12;
+        this.cb.onClashMash?.(c.p1Power);
+      }
     }
     // gentle decay so the orb naturally drifts toward whoever stops mashing
     const diff = (c.p1Power - c.p2Power) * 0.12;
@@ -1096,37 +1153,57 @@ export class FightEngine {
     }
     this.shakeMag = Math.max(this.shakeMag, 6);
 
-    // resolve when the orb reaches a fighter OR after a max duration
+    // OFFLINE: resolve locally when the orb reaches a fighter or times out.
+    // ONLINE: the SERVER decides the winner (via applyClashResult) so both
+    // players see the exact same outcome — never resolve locally here.
+    if (this.isOnline) return;
+
     const p1Lost = c.x <= this.p1.x + FIGHTER_W * 0.7;
     const p2Lost = c.x >= this.p2.x - FIGHTER_W * 0.7;
     const timeout = c.time > 240;
 
     if ((p1Lost || p2Lost || timeout) && !c.resolved) {
-      c.resolved = true;
       let winner: "p1" | "p2";
       if (p2Lost) winner = "p1";
       else if (p1Lost) winner = "p2";
       else winner = c.p1Power >= c.p2Power ? "p1" : "p2";
-
-      const loser = winner === "p1" ? this.p2 : this.p1;
-      const champ = winner === "p1" ? this.p1 : this.p2;
-      // huge clash explosion
-      this.beamExplosion(loser.x, loser.y + 48, c.p1Beam.color, c.p2Beam.color, "#ffffff");
-      this.beamExplosion(loser.x, loser.y + 48, "#ffffff", c.p1Beam.color, c.p2Beam.color);
-      this.shakeMag = 30;
-      this.hitFlash = 1;
-      this.texts.push({
-        x: champ.x, y: champ.y - 30,
-        text: "CLASH WIN!", life: 60, color: "#ffd23b", size: 34,
-      });
-      // big damage + launch to the loser (online: only local owner applies/sends)
-      if (!this.isOnline || winner === "p1") {
-        this.applyDamage(loser, champ, 30, winner, true);
-      }
-      // remove the clashing beams
-      this.beams = this.beams.filter((b) => b !== c.p1Beam && b !== c.p2Beam);
-      this.beamClash = null;
+      this.finishClash(winner);
     }
+  }
+
+  // Shared clash finisher (explosion + damage). Online passes the server's winner.
+  finishClash(winner: "p1" | "p2") {
+    const c = this.beamClash;
+    if (!c || c.resolved) return;
+    c.resolved = true;
+    const loser = winner === "p1" ? this.p2 : this.p1;
+    const champ = winner === "p1" ? this.p1 : this.p2;
+    this.beamExplosion(loser.x, loser.y + 48, c.p1Beam.color, c.p2Beam.color, "#ffffff");
+    this.beamExplosion(loser.x, loser.y + 48, "#ffffff", c.p1Beam.color, c.p2Beam.color);
+    this.shakeMag = 30;
+    this.hitFlash = 1;
+    this.texts.push({
+      x: champ.x, y: champ.y - 30,
+      text: winner === "p1" ? "CLASH WIN!" : "CLASH LOST", life: 60,
+      color: winner === "p1" ? "#ffd23b" : "#ff5b5b", size: 34,
+    });
+    // big damage + launch (online: only the local winner applies/sends damage)
+    if (!this.isOnline || winner === "p1") {
+      this.applyDamage(loser, champ, 30, winner, true);
+    }
+    this.beams = this.beams.filter((b) => b !== c.p1Beam && b !== c.p2Beam);
+    this.beamClash = null;
+    this.clashRequested = false;
+  }
+
+  // ONLINE: server tells both clients who won the clash.
+  applyClashResult(localWon: boolean) {
+    if (!this.beamClash) {
+      // edge case: clash already cleared — just clear the request flag
+      this.clashRequested = false;
+      return;
+    }
+    this.finishClash(localWon ? "p1" : "p2");
   }
 
   applyDamage(

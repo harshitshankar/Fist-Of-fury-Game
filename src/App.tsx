@@ -140,6 +140,10 @@ export default function App() {
           registerRemoteState={mp.setOnRemoteState}
           registerRemoteHit={mp.setOnRemoteHit}
           registerRoundResult={mp.setOnRoundResult}
+          onClashDetect={mp.clashDetect}
+          onClashMash={mp.clashMash}
+          registerClashStart={mp.setOnClashStart}
+          registerClashResult={mp.setOnClashResult}
           onExit={exitToLobby}
         />
         <ChatPanel
