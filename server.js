@@ -288,5 +288,6 @@ function genCode() {
 }
 
 httpServer.listen(PORT, () => {
-  console.log(`🥊 FIST OF FURY server running on port ${PORT}`);
+  // If you see this exact line in the Render logs, the NEW server.js is live.
+  console.log("🥊 FIST OF FURY server v2 (Express5-safe routing) running on port " + PORT);
 });

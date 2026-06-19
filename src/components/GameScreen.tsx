@@ -334,6 +334,11 @@ export default function GameScreen(props: Props) {
             <div className="mt-2 text-xl font-bold text-white sm:text-3xl">
               {victory.name} is the champion
             </div>
+            {totalRounds > 1 && (
+              <div className="mt-2 text-lg font-black text-orange-300">
+                Final Score — {props.p1Name}: {roundWins.p1} &nbsp;•&nbsp; {props.p2Name}: {roundWins.p2}
+              </div>
+            )}
             <div className="mt-8 flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
               <button
                 onClick={props.onExit}

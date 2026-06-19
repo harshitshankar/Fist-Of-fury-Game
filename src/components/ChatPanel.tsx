@@ -43,15 +43,14 @@ export default function ChatPanel({
 
   return (
     <>
-      {/* floating buttons */}
-      <div className="fixed bottom-4 right-4 z-40 flex flex-col gap-2">
+      {/* floating buttons — top-center area so they NEVER overlap the
+          movement pad (bottom-left) or the attack pad (bottom-right). */}
+      <div className="fixed left-2 top-1/2 z-40 flex -translate-y-1/2 flex-col gap-2">
         {voiceEnabled && (
           <button
             onClick={onToggleVoice}
-            className={`flex h-12 w-12 items-center justify-center rounded-full text-xl shadow-lg transition ${
-              voiceActive
-                ? "bg-green-500 animate-pulse"
-                : "bg-slate-700"
+            className={`flex h-10 w-10 items-center justify-center rounded-full text-lg shadow-lg transition ${
+              voiceActive ? "bg-green-500 animate-pulse" : "bg-slate-700/90"
             }`}
             title="Voice chat"
           >
@@ -60,7 +59,8 @@ export default function ChatPanel({
         )}
         <button
           onClick={() => setOpen((o) => !o)}
-          className="relative flex h-12 w-12 items-center justify-center rounded-full bg-orange-500 text-xl shadow-lg"
+          className="relative flex h-10 w-10 items-center justify-center rounded-full bg-orange-500/90 text-lg shadow-lg"
+          title="Chat"
         >
           💬
           {unread > 0 && (
@@ -72,7 +72,7 @@ export default function ChatPanel({
       </div>
 
       {open && (
-        <div className="fixed bottom-20 right-4 z-40 flex h-80 w-72 flex-col rounded-2xl border border-orange-500/40 bg-slate-900/95 shadow-2xl backdrop-blur">
+        <div className="fixed left-14 top-1/2 z-40 flex h-72 w-72 max-w-[80vw] -translate-y-1/2 flex-col rounded-2xl border border-orange-500/40 bg-slate-900/95 shadow-2xl backdrop-blur">
           <div className="flex items-center justify-between border-b border-white/10 px-3 py-2">
             <span className="font-black text-orange-400">CHAT</span>
             <button onClick={() => setOpen(false)} className="text-white/60">

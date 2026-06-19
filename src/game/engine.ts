@@ -158,6 +158,7 @@ export class FightEngine {
   currentRound = 1;
   roundOver = false;     // a single round just ended (but match may continue)
   roundWinner: "p1" | "p2" | null = null;
+  roundGrace = 0;        // frames after a round reset where remote HP is ignored
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -267,6 +268,7 @@ export class FightEngine {
     this.bgTime += dt * 0.5;
     if (this.shakeMag > 0) this.shakeMag *= 0.86;
     if (this.hitFlash > 0) this.hitFlash -= 0.06 * dt;
+    if (this.roundGrace > 0) this.roundGrace -= dt;
 
     if (this.matchOver || this.roundOver) {
       this.victoryTimer += dt;
@@ -299,7 +301,9 @@ export class FightEngine {
         if (typeof s.x === "number") this.p2.x += (s.x - this.p2.x) * 0.35 * dt;
         if (typeof s.y === "number") this.p2.y += (s.y - this.p2.y) * 0.35 * dt;
         if (typeof s.facing === "number") this.p2.facing = s.facing as FacingDir;
-        if (typeof s.hp === "number") this.p2.hp = s.hp;
+        // Ignore remote HP during the round-reset grace window so a stale
+        // post-KO hp:0 snapshot can't instantly re-end the next round.
+        if (typeof s.hp === "number" && this.roundGrace <= 0) this.p2.hp = s.hp;
         if (typeof s.meter === "number") this.p2.meter = s.meter;
         if (s.anim) {
           // detect the opponent starting a special -> spawn a visual beam (no local damage)
@@ -410,6 +414,7 @@ export class FightEngine {
     this.roundWinner = null;
     this.victoryTimer = 0;
     this.targetTimeScale = 1;
+    this.roundGrace = 90; // ~1.5s where stale remote HP is ignored
     this.cb.onRoundStart?.(this.currentRound);
   }
 
