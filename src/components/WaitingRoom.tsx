@@ -27,8 +27,8 @@ export default function WaitingRoom({
   const bothReady = players.length === 2 && players.every((p) => p.ready);
 
   return (
-    <div className="flex min-h-[100dvh] flex-col items-center justify-center bg-gradient-to-b from-[#0a0a2e] via-[#1a1040] to-[#2a0a3e] px-4 py-8 text-white">
-      <div className="w-full max-w-md space-y-6">
+    <div className="flex min-h-[100dvh] w-full flex-col items-center justify-center bg-gradient-to-b from-[#0a0a2e] via-[#1a1040] to-[#2a0a3e] px-4 py-8 text-white">
+      <div className="w-full max-w-md space-y-6 py-4">
         <div className="text-center">
           <p className="text-sm font-bold tracking-widest text-orange-300">ROOM CODE</p>
           <div className="mt-1 flex items-center justify-center gap-2">

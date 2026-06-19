@@ -3,25 +3,25 @@
 html,
 body {
   margin: 0;
+  padding: 0;
   background: #0a0a2e;
   -webkit-tap-highlight-color: transparent;
   font-family: system-ui, "Segoe UI", Roboto, sans-serif;
 }
 
+/* The page scrolls normally everywhere. Menus (Lobby/WaitingRoom) flow in
+   normal document scroll; the in-match GameScreen overlays as fixed so it
+   never needs to lock body scroll. */
+html {
+  height: 100%;
+}
+body {
+  min-height: 100%;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
 #root {
   min-height: 100%;
-}
-
-/* Lock scrolling ONLY while a match is on-screen (toggled by GameScreen).
-   The lobby and waiting room scroll normally. */
-body.no-scroll {
-  position: fixed;
-  inset: 0;
-  width: 100%;
-  overflow: hidden;
-  overscroll-behavior: none;
-  -webkit-user-select: none;
-  user-select: none;
 }
 
 @keyframes victoryIn {

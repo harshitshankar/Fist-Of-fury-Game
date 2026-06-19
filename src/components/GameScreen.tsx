@@ -47,8 +47,9 @@ export default function GameScreen(props: Props) {
   const [curRound, setCurRound] = useState(1);
 
   useEffect(() => {
-    // lock page scrolling only while the match is mounted
-    document.body.classList.add("no-scroll");
+    // GameScreen overlays the page as fixed (see root div) so we don't need to
+    // lock body scrolling. Scroll the page to top so the match fills the view.
+    window.scrollTo(0, 0);
     const canvas = canvasRef.current!;
     const resize = () => {
       const rect = canvas.getBoundingClientRect();
@@ -202,7 +203,6 @@ export default function GameScreen(props: Props) {
       window.removeEventListener("keyup", ku);
       engine.stop();
       stopMusic();
-      document.body.classList.remove("no-scroll");
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -217,7 +217,7 @@ export default function GameScreen(props: Props) {
   const map = getMap(props.mapId);
 
   return (
-    <div className="relative h-[100dvh] w-full overflow-hidden bg-black select-none">
+    <div className="fixed inset-0 z-[100] h-[100dvh] w-full overflow-hidden bg-black select-none">
       <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />
 
       {/* Rotate-to-landscape hint (portrait phones only) */}

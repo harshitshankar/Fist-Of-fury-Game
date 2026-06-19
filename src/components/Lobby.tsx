@@ -63,7 +63,7 @@ export default function Lobby({ onCreate, onJoin, onSolo, error, connecting }: P
 
   return (
     <div className="min-h-[100dvh] w-full bg-gradient-to-b from-[#0a0a2e] via-[#1a1040] to-[#2a0a3e] px-4 py-6 text-white">
-      <div className="mx-auto max-w-md space-y-5 pb-10">
+      <div className="mx-auto max-w-md space-y-5 pb-16">
         {/* Title */}
         <div className="text-center">
           <h1 className="bg-gradient-to-r from-yellow-300 via-orange-500 to-red-600 bg-clip-text text-4xl font-black text-transparent drop-shadow-[0_0_20px_rgba(255,90,0,0.6)] sm:text-5xl">
@@ -177,8 +177,10 @@ export default function Lobby({ onCreate, onJoin, onSolo, error, connecting }: P
 
         {/* Character roster */}
         <div>
-          <h2 className="mb-2 text-center text-xl font-black text-orange-400">Select Fighter:</h2>
-          <div className="grid grid-cols-4 gap-2">
+          <h2 className="mb-2 text-center text-xl font-black text-orange-400">
+            Select Fighter <span className="text-sm text-white/50">({FIGHTERS.length})</span>
+          </h2>
+          <div className="grid max-h-56 grid-cols-4 gap-2 overflow-y-auto rounded-xl border border-white/10 bg-black/20 p-2">
             {FIGHTERS.map((f) => (
               <button
                 key={f.id}
@@ -209,8 +211,10 @@ export default function Lobby({ onCreate, onJoin, onSolo, error, connecting }: P
 
         {/* Map select */}
         <div>
-          <h2 className="mb-2 text-center text-xl font-black text-orange-500">Select Map:</h2>
-          <div className="grid grid-cols-3 gap-2">
+          <h2 className="mb-2 text-center text-xl font-black text-orange-500">
+            Select Map <span className="text-sm text-white/50">({MAPS.length})</span>
+          </h2>
+          <div className="grid max-h-56 grid-cols-3 gap-2 overflow-y-auto rounded-xl border border-white/10 bg-black/20 p-2">
             {MAPS.map((m) => (
               <button
                 key={m.id}

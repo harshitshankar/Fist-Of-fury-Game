@@ -926,7 +926,7 @@ export class FightEngine {
     ctx.restore();
 
     // unique scenery per map
-    switch (m.id) {
+    switch (m.scene || m.id) {
       case "dojo": this.sceneDojo(ctx, m); break;
       case "neon": this.sceneNeon(ctx, m); break;
       case "volcano": this.sceneVolcano(ctx, m); break;

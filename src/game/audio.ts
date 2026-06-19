@@ -139,7 +139,7 @@ interface MusicTrack {
   leadType: OscillatorType;
 }
 
-// A small library of looping tracks. Negative numbers are low octaves.
+// Hand-authored menu theme; battle themes are generated per-map below.
 const TRACKS: Record<string, MusicTrack> = {
   menu: {
     bpm: 96,
@@ -149,31 +149,99 @@ const TRACKS: Record<string, MusicTrack> = {
     bassType: "triangle",
     leadType: "square",
   },
-  battle: {
-    bpm: 140,
-    bass: [-17, -17, -17, -15, -20, -20, -13, -12],
-    arp: [0, 3, 7, 12, -2, 3, 7, 10, 0, 5, 8, 12, 3, 7, 10, 14],
-    lead: [12, 10, 7, 12, -99, 10, 14, 12],
-    bassType: "sawtooth",
-    leadType: "square",
-  },
-  battle2: {
-    bpm: 150,
-    bass: [-19, -19, -14, -14, -17, -17, -12, -10],
-    arp: [-2, 2, 5, 9, 0, 5, 9, 12, -4, 0, 3, 8, 1, 5, 8, 13],
-    lead: [9, 14, 12, 9, 7, -99, 12, 14],
-    bassType: "sawtooth",
-    leadType: "triangle",
-  },
-  battle3: {
-    bpm: 128,
-    bass: [-22, -22, -17, -15, -20, -18, -13, -13],
-    arp: [-5, 2, 7, 11, -3, 4, 7, 12, -7, 0, 5, 9, -2, 5, 9, 14],
-    lead: [11, -99, 7, 11, 14, 12, -99, 9],
-    bassType: "triangle",
-    leadType: "square",
-  },
 };
+
+// Musical scales (semitone patterns) to give each track a distinct mood.
+const SCALES: Record<string, number[]> = {
+  minor: [0, 2, 3, 5, 7, 8, 10, 12],          // dark / tense
+  major: [0, 2, 4, 5, 7, 9, 11, 12],          // bright / heroic
+  pentatonic: [0, 2, 4, 7, 9, 12, 14, 16],    // upbeat / catchy
+  phrygian: [0, 1, 3, 5, 7, 8, 10, 12],       // exotic / eastern
+  dorian: [0, 2, 3, 5, 7, 9, 10, 12],         // cool / mysterious
+  blues: [0, 3, 5, 6, 7, 10, 12, 15],         // gritty / heavy
+  lydian: [0, 2, 4, 6, 7, 9, 11, 12],         // dreamy / cosmic
+  harmonic: [0, 2, 3, 5, 7, 8, 11, 12],       // dramatic
+};
+
+const BASS_TYPES: OscillatorType[] = ["sawtooth", "triangle", "square"];
+const LEAD_TYPES: OscillatorType[] = ["square", "triangle", "sawtooth"];
+
+// Deterministic pseudo-random from a string seed (so a track is stable).
+function seedRand(seed: string) {
+  let h = 2166136261;
+  for (let i = 0; i < seed.length; i++) {
+    h ^= seed.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return () => {
+    h += 0x6d2b79f5;
+    let t = h;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// Generate a unique looping battle track for a given theme key.
+function generateTrack(key: string, scaleName: string, bpm: number, root: number): MusicTrack {
+  const rnd = seedRand(key + scaleName);
+  const scale = SCALES[scaleName] || SCALES.minor;
+  const pick = () => scale[Math.floor(rnd() * scale.length)];
+
+  const bass: number[] = [];
+  for (let i = 0; i < 8; i++) bass.push(root - 12 + (i % 2 === 0 ? 0 : pick() % 5));
+  const arp: number[] = [];
+  for (let i = 0; i < 16; i++) arp.push(root + pick());
+  const lead: number[] = [];
+  for (let i = 0; i < 8; i++) lead.push(rnd() > 0.25 ? root + 12 + pick() : -99);
+
+  return {
+    bpm,
+    bass,
+    arp,
+    lead,
+    bassType: BASS_TYPES[Math.floor(rnd() * BASS_TYPES.length)],
+    leadType: LEAD_TYPES[Math.floor(rnd() * LEAD_TYPES.length)],
+  };
+}
+
+// Per-map music definitions: scale + tempo + key give each arena its own song.
+const MAP_MUSIC: Record<string, { scale: string; bpm: number; root: number }> = {
+  dojo: { scale: "phrygian", bpm: 132, root: -5 },
+  neon: { scale: "minor", bpm: 150, root: -3 },
+  volcano: { scale: "blues", bpm: 128, root: -7 },
+  space: { scale: "lydian", bpm: 120, root: 0 },
+  frozen: { scale: "dorian", bpm: 124, root: -2 },
+  arena: { scale: "major", bpm: 140, root: -5 },
+  forest: { scale: "dorian", bpm: 118, root: -4 },
+  desert: { scale: "phrygian", bpm: 126, root: -6 },
+  cyber: { scale: "minor", bpm: 158, root: -3 },
+  underwater: { scale: "lydian", bpm: 112, root: -1 },
+  castle: { scale: "harmonic", bpm: 134, root: -5 },
+  graveyard: { scale: "harmonic", bpm: 116, root: -7 },
+  sky: { scale: "major", bpm: 138, root: 0 },
+  factory: { scale: "blues", bpm: 146, root: -6 },
+  temple: { scale: "phrygian", bpm: 122, root: -4 },
+  storm: { scale: "minor", bpm: 152, root: -3 },
+  jungle: { scale: "pentatonic", bpm: 130, root: -5 },
+  crystal: { scale: "lydian", bpm: 128, root: -1 },
+  hell: { scale: "blues", bpm: 156, root: -8 },
+  heaven: { scale: "major", bpm: 110, root: 2 },
+  ruins: { scale: "harmonic", bpm: 124, root: -6 },
+  tundra: { scale: "dorian", bpm: 120, root: -2 },
+  carnival: { scale: "pentatonic", bpm: 144, root: -3 },
+  void: { scale: "minor", bpm: 134, root: -5 },
+};
+
+// Pick (and lazily build) the unique battle track for a map id.
+export function battleTrackForMap(mapId: string): string {
+  const key = "battle_" + mapId;
+  if (!TRACKS[key]) {
+    const cfg = MAP_MUSIC[mapId] || { scale: "minor", bpm: 138, root: -4 };
+    TRACKS[key] = generateTrack(key, cfg.scale, cfg.bpm, cfg.root);
+  }
+  return key;
+}
 
 let musicTimer: number | null = null;
 let musicEnabled = true;
@@ -194,19 +262,6 @@ function playMusicNote(semitone: number, dur: number, type: OscillatorType, vol:
   g.connect(musicBus);
   o.start(now);
   o.stop(now + dur + 0.02);
-}
-
-// Pick a battle track based on the map id (for variety).
-export function battleTrackForMap(mapId: string): string {
-  const map: Record<string, string> = {
-    dojo: "battle",
-    arena: "battle",
-    neon: "battle2",
-    space: "battle2",
-    volcano: "battle3",
-    frozen: "battle3",
-  };
-  return map[mapId] || "battle";
 }
 
 /** Start (or switch to) a looping music track. */

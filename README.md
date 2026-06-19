@@ -16,14 +16,17 @@ service** you can push to GitHub and deploy to **Render** in minutes.
 - **Real online multiplayer** — host creates a room, friend joins with the code.
 - **"Room is already full" protection** — every room holds **exactly 2 players**.
   A third player is rejected until someone leaves.
-- **8 unique fighters** — each with their own stats, fighting style, signature
-  special move and aura (Blaze 🔥, Frost ❄️, Volt ⚡, Venom 🐍, Titan 🛡️,
-  Nova 🌟, Ronin ⚔️, Magma 🌋).
-- **6 detailed arenas** — Ancient Dojo (pagoda, mountains, glowing lanterns),
-  Neon City (layered skyscrapers with lit windows + flying cars), Volcano Crater
-  (jagged peaks, lava glow, rising embers), Cosmic Void (starfield, ringed
-  planet, nebula), Frozen Peaks (snowy mountains + aurora) and Grand Arena
-  (colosseum crowd, spotlights, banners) — all with textured perspective floors.
+- **24 unique fighters** — each with their own stats, fighting style, signature
+  special move and uniquely-colored energy beam (Blaze 🔥, Frost ❄️, Volt ⚡,
+  Venom 🐍, Titan 🛡️, Nova 🌟, Ronin ⚔️, Magma 🌋, Tempest 🌪️, Obsidian 🖤,
+  Seraph 👼, Reaper 💀, Aqua 🌊, Phantom 👻, Inferna 💃, Goliath 🦏, Spark 🛹,
+  Kaiju 🦖, Mystic 🔮, Blade 🗡️, Lumen 🌈, Drakon 🐲, Celesta ✨, Ragnar 🪓).
+- **24 detailed arenas** — Ancient Dojo, Neon City, Volcano Crater, Cosmic Void,
+  Frozen Peaks, Grand Arena, Enchanted Forest, Desert Ruins, Cyber Grid, Deep
+  Abyss, Dark Castle, Cursed Graveyard, Sky Sanctuary, Steel Factory, Jade
+  Temple, Thunder Storm, Lost Jungle, Crystal Caverns, Infernal Pit, Celestial
+  Gate, Lost Civilization, Frozen Tundra, Neon Carnival and The Void — each with
+  animated scenery and its **own unique background music track**.
 - **Responsive touch controls** — move, jump, punch, kick, block & special.
   Also playable with keyboard on desktop.
 - **Fighting animations & FX** — punches, kicks, screen shake, hit flashes,
@@ -42,8 +45,9 @@ service** you can push to GitHub and deploy to **Render** in minutes.
 - **Procedural sound effects** — punches, kicks, blocks, special blasts, KO and
   a victory jingle (Web Audio API, no audio files needed). Mute toggle in-match.
 - **Background music** — looping chiptune-style soundtracks generated
-  procedurally (no audio files): a menu theme in the lobby and per-arena battle
-  themes during fights. Music on/off toggle in the lobby + mute covers it too.
+  procedurally (no audio files): a menu theme in the lobby and a **unique battle
+  theme for every one of the 24 arenas** (different scale, tempo & key per map).
+  Music on/off toggle in the lobby + the in-match mute covers it too.
 - **App-like presentation** — auto-fullscreen + landscape lock and a
   "rotate your device" hint on portrait phones.
 - **CPU mode** — practice vs an AI bot offline.

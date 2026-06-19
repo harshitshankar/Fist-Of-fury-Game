@@ -5,6 +5,7 @@ import GameScreen from "./components/GameScreen";
 import ChatPanel from "./components/ChatPanel";
 import { useMultiplayer } from "./net/useMultiplayer";
 import { unlockAudio } from "./game/audio";
+import { FIGHTERS } from "./game/characters";
 
 type Phase = "lobby" | "room" | "fight" | "solo";
 
@@ -153,8 +154,6 @@ export default function App() {
 }
 
 function pickCpu(playerId: string) {
-  const ids = ["blaze", "frost", "volt", "venom", "titan", "nova", "ronin", "magma"].filter(
-    (i) => i !== playerId
-  );
+  const ids = FIGHTERS.map((f) => f.id).filter((i) => i !== playerId);
   return ids[Math.floor(Math.random() * ids.length)];
 }
