@@ -5,3 +5,13 @@ dist
 .env
 .vscode
 .idea
+
+# Dependencies
+node_modules/
+
+# Native Android folder
+android/
+
+# Bonus: You should probably ignore these too if they aren't already:
+.idea/
+dist/
