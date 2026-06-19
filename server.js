@@ -121,6 +121,12 @@ function tryStart(room) {
       io.to(room.code).emit("room:countdown", n);
       if (n <= 0) {
         clearInterval(iv);
+        // reset server-authoritative round state for the new match
+        room.score = {};
+        [...room.players.keys()].forEach((id) => (room.score[id] = 0));
+        room.round = 1;
+        room.matchDone = false;
+        room.resolving = false;
         io.to(room.code).emit("match:start", { mapId: room.mapId, rounds: room.rounds });
       }
     }, 1000);
@@ -249,6 +255,53 @@ io.on("connection", (socket) => {
   });
   socket.on("p:hit", (d) => {
     if (currentRoom) socket.to(currentRoom).emit("opp:hit", d);
+  });
+
+  // ---- Server-authoritative ROUND result ----
+  // A client reports a KO ("loserId" = the socket id of the player who lost).
+  // The server accepts only the FIRST report per round, updates the score, and
+  // broadcasts the identical result to BOTH players so they stay perfectly synced.
+  socket.on("round:ko", ({ loserId, round }) => {
+    if (!currentRoom) return;
+    const room = rooms.get(currentRoom);
+    if (!room) return;
+    if (room.score === undefined) {
+      room.score = {};
+      room.round = 1;
+      room.matchDone = false;
+    }
+    // ignore stale/duplicate reports for a round already resolved.
+    // NOTE: we intentionally do NOT reject on round-number mismatch — the
+    // `resolving` lock already prevents double-counting, and being lenient on
+    // the round number avoids any chance of a stuck/desynced match if the two
+    // clients' local counters drift slightly.
+    if (room.matchDone) return;
+    if (room.resolving) return;
+    room.resolving = true;
+
+    const ids = [...room.players.keys()];
+    const winnerId = ids.find((id) => id !== loserId) || ids[0];
+    room.score[winnerId] = (room.score[winnerId] || 0) + 1;
+
+    const roundsToWin = Math.floor((room.rounds || 3) / 2) + 1;
+    const matchOver = room.score[winnerId] >= roundsToWin;
+
+    io.to(currentRoom).emit("round:result", {
+      winnerId,
+      loserId,
+      round: room.round,
+      score: room.score,
+      matchOver,
+      nextRound: room.round + 1,
+    });
+
+    if (matchOver) {
+      room.matchDone = true;
+    } else {
+      room.round += 1;
+      // allow the next KO report after both clients have reset
+      setTimeout(() => { room.resolving = false; }, 2600);
+    }
   });
 
   // ---- Chat ----

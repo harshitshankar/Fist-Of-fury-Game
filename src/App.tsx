@@ -132,10 +132,14 @@ export default function App() {
           p2Name={opp?.name || "Opponent"}
           online
           rounds={state.rounds}
+          selfId={state.selfId}
+          oppId={opp?.id || null}
           onSendState={mp.sendState}
           onSendHit={mp.sendHit}
+          onReportKO={mp.reportKO}
           registerRemoteState={mp.setOnRemoteState}
           registerRemoteHit={mp.setOnRemoteHit}
+          registerRoundResult={mp.setOnRoundResult}
           onExit={exitToLobby}
         />
         <ChatPanel

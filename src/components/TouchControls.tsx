@@ -6,7 +6,10 @@ import { InputState } from "../game/engine";
 
 interface Props {
   onChange: (i: Partial<InputState>) => void;
-  meterPct: number;
+  specialReady: boolean;   // meter charged enough to fire the special
+  weaponEquipped: boolean; // weapon currently in hand
+  weaponThrown: boolean;   // weapon already thrown this round (gone)
+  weaponEmoji: string;     // this fighter's weapon emoji
 }
 
 function HoldButton({
@@ -60,25 +63,31 @@ function HoldButton({
   return (
     <button
       ref={ref}
-      className={`select-none rounded-full font-black text-white shadow-lg active:shadow-none transition-all flex flex-col items-center justify-center leading-none border-2 border-white/30 ${
-        big ? "w-20 h-20 text-3xl" : "w-16 h-16 text-2xl"
-      } ${disabled ? "opacity-40" : ""}`}
+      className={`select-none rounded-full font-black text-white shadow-md active:shadow-none transition-all flex flex-col items-center justify-center leading-none border border-white/25 ${
+        big ? "w-14 h-14 text-xl sm:w-16 sm:h-16 sm:text-2xl" : "w-11 h-11 text-base sm:w-12 sm:h-12 sm:text-lg"
+      } ${disabled ? "opacity-35" : ""}`}
       style={{
         background: `radial-gradient(circle at 30% 25%, ${color}, ${color}99)`,
         touchAction: "none",
       }}
     >
       <span>{label}</span>
-      {sub && <span className="text-[9px] font-bold mt-0.5 opacity-90">{sub}</span>}
+      {sub && <span className="text-[7px] sm:text-[8px] font-bold mt-0.5 opacity-90">{sub}</span>}
     </button>
   );
 }
 
-export default function TouchControls({ onChange, meterPct }: Props) {
+export default function TouchControls({
+  onChange,
+  specialReady,
+  weaponEquipped,
+  weaponThrown,
+  weaponEmoji,
+}: Props) {
   return (
-    <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 flex items-end justify-between px-3 pb-3 sm:px-6 sm:pb-6">
+    <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 flex items-end justify-between px-2 pb-2 sm:px-4 sm:pb-4">
       {/* LEFT: movement */}
-      <div className="pointer-events-auto flex items-end gap-2">
+      <div className="pointer-events-auto flex items-end gap-1.5">
         <HoldButton
           label="◀"
           color="#3b82f6"
@@ -96,8 +105,8 @@ export default function TouchControls({ onChange, meterPct }: Props) {
       </div>
 
       {/* RIGHT: attacks (JUMP now lives here on the right side) */}
-      <div className="pointer-events-auto flex flex-col items-end gap-2">
-        <div className="flex items-center gap-2">
+      <div className="pointer-events-auto flex flex-col items-end gap-1.5">
+        <div className="flex items-center gap-1.5">
           <HoldButton
             label="🛡"
             sub="BLOCK"
@@ -115,14 +124,41 @@ export default function TouchControls({ onChange, meterPct }: Props) {
           <HoldButton
             label="💥"
             sub="SPECIAL"
-            color={meterPct >= 50 ? "#f59e0b" : "#555"}
+            color={specialReady ? "#f59e0b" : "#555"}
             big
-            disabled={meterPct < 50}
+            disabled={!specialReady}
             onDown={() => onChange({ special: true })}
             onUp={() => onChange({ special: false })}
           />
         </div>
-        <div className="flex items-center gap-2">
+        {/* Weapon row */}
+        <div className="flex items-center gap-1.5">
+          <HoldButton
+            label={weaponThrown ? "∅" : weaponEquipped ? "🤚" : weaponEmoji}
+            sub="HOLSTER"
+            color={weaponThrown ? "#444" : "#7c5cff"}
+            disabled={weaponThrown}
+            onDown={() => onChange({ holster: true })}
+            onUp={() => onChange({ holster: false })}
+          />
+          <HoldButton
+            label={weaponEquipped && !weaponThrown ? weaponEmoji : "🚫"}
+            sub="WEAPON"
+            color={weaponEquipped && !weaponThrown ? "#16a34a" : "#444"}
+            disabled={!weaponEquipped || weaponThrown}
+            onDown={() => onChange({ weapon: true })}
+            onUp={() => onChange({ weapon: false })}
+          />
+          <HoldButton
+            label={weaponEquipped && !weaponThrown ? "🎯" : "🚫"}
+            sub="THROW"
+            color={weaponEquipped && !weaponThrown ? "#e11d48" : "#444"}
+            disabled={!weaponEquipped || weaponThrown}
+            onDown={() => onChange({ throwWeapon: true })}
+            onUp={() => onChange({ throwWeapon: false })}
+          />
+        </div>
+        <div className="flex items-center gap-1.5">
           <HoldButton
             label="👊"
             sub="PUNCH"

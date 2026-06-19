@@ -10,6 +10,8 @@
 import { Fighter, getFighter } from "./characters";
 import { ArenaMap, getMap } from "./maps";
 import { Sfx } from "./audio";
+import { getBuild } from "./builds";
+import { getWeapon, spinsInFlight } from "./weapons";
 
 export type FacingDir = 1 | -1;
 
@@ -21,6 +23,9 @@ export interface InputState {
   kick: boolean;
   block: boolean;
   special: boolean;
+  weapon: boolean;      // weapon melee attack (only when equipped)
+  throwWeapon: boolean; // throw the weapon as a projectile
+  holster: boolean;     // toggle equip / put away the weapon
 }
 
 export const EMPTY_INPUT: InputState = {
@@ -31,6 +36,9 @@ export const EMPTY_INPUT: InputState = {
   kick: false,
   block: false,
   special: false,
+  weapon: false,
+  throwWeapon: false,
+  holster: false,
 };
 
 type Anim =
@@ -41,6 +49,8 @@ type Anim =
   | "kick"
   | "block"
   | "special"
+  | "weaponAtk"
+  | "throw"
   | "hurt"
   | "ko"
   | "win";
@@ -64,6 +74,10 @@ export interface FighterState {
   customColor?: string;
   fighterId: string;
   name: string;
+  specialUsed: boolean;   // true once the special beam is fired this round
+  weaponEquipped: boolean; // weapon is drawn/held in hand
+  weaponThrown: boolean;   // weapon has been thrown (gone until pickup/next round)
+  actionCd: number;        // debounce for holster/throw toggles
 }
 
 interface Particle {
@@ -104,6 +118,22 @@ interface Beam {
   charge: number;     // 0..1 charge-up before firing (DBZ style)
 }
 
+interface ThrownWeapon {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  dir: FacingDir;
+  rot: number;        // current rotation (radians)
+  spin: number;       // rotation speed
+  spins: boolean;     // spins in flight vs flies straight
+  owner: "p1" | "p2";
+  fighterId: string;
+  dmg: number;
+  hit: boolean;
+  life: number;
+}
+
 const WORLD = { w: 1280, h: 600 };
 const GROUND_Y = 480;
 const GRAVITY = 0.9;
@@ -118,6 +148,7 @@ export interface EngineCallbacks {
   onMeterFull?: () => void;
   onRoundEnd?: (winner: "p1" | "p2", p1Rounds: number, p2Rounds: number) => void;
   onRoundStart?: (round: number) => void;
+  onReportKO?: (who: "self" | "opponent") => void; // online: report KO to server
 }
 
 export class FightEngine {
@@ -130,9 +161,13 @@ export class FightEngine {
   p2: FighterState;
   particles: Particle[] = [];
   beams: Beam[] = [];
+  thrownWeapons: ThrownWeapon[] = [];
   texts: FloatingText[] = [];
   input: InputState = { ...EMPTY_INPUT };
   remoteInput: InputState = { ...EMPTY_INPUT };
+  // CPU AI decision state
+  aiTimer = 0;
+  aiAction: "approach" | "punch" | "kick" | "special" | "jump" | "block" | "retreat" = "approach";
   timeScale = 1;
   targetTimeScale = 1;
   shakeMag = 0;
@@ -159,6 +194,7 @@ export class FightEngine {
   roundOver = false;     // a single round just ended (but match may continue)
   roundWinner: "p1" | "p2" | null = null;
   roundGrace = 0;        // frames after a round reset where remote HP is ignored
+  reportedKO = false;    // online: have we reported this round's KO to the server yet
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -216,6 +252,10 @@ export class FightEngine {
       customColor: custom,
       fighterId: f.id,
       name,
+      specialUsed: false,
+      weaponEquipped: true, // start each round with the weapon ready in hand
+      weaponThrown: false,
+      actionCd: 0,
     };
   }
 
@@ -256,6 +296,8 @@ export class FightEngine {
       anim: this.p1.anim,
       animTime: this.p1.animTime,
       blocking: this.p1.blocking,
+      weaponEquipped: this.p1.weaponEquipped,
+      weaponThrown: this.p1.weaponThrown,
     };
   }
 
@@ -275,6 +317,7 @@ export class FightEngine {
       this.updateFighterPhysics(this.p1, step, true);
       this.updateFighterPhysics(this.p2, step, true);
       this.updateBeams(step);
+      this.updateThrownWeapons(step);
       this.updateParticles(step);
       this.updateTexts(dt);
       return;
@@ -310,9 +353,15 @@ export class FightEngine {
           if (s.anim === "special" && this.p2.anim !== "special") {
             this.spawnRemoteBeam();
           }
+          // detect the opponent throwing their weapon -> spawn visual projectile
+          if (s.anim === "throw" && this.p2.anim !== "throw") {
+            this.spawnRemoteWeapon();
+          }
           this.p2.anim = s.anim;
         }
         if (typeof s.blocking === "boolean") this.p2.blocking = s.blocking;
+        if (typeof (s as any).weaponEquipped === "boolean") this.p2.weaponEquipped = (s as any).weaponEquipped;
+        if (typeof (s as any).weaponThrown === "boolean") this.p2.weaponThrown = (s as any).weaponThrown;
       }
       this.updateFighterPhysics(this.p2, step, false);
       this.p2.animTime += step;
@@ -333,12 +382,57 @@ export class FightEngine {
     if (!this.isOnline) this.p2.meter = Math.min(100, this.p2.meter + 0.05 * step);
 
     this.updateBeams(step);
+    this.updateThrownWeapons(step);
     this.updateParticles(step);
     this.updateTexts(dt);
 
     // KO check (ends the current round)
-    if (this.p1.hp <= 0 && !this.matchOver && !this.roundOver) this.endRound("p2");
-    else if (this.p2.hp <= 0 && !this.matchOver && !this.roundOver) this.endRound("p1");
+    if (this.isOnline) {
+      // ONLINE: the server is authoritative for round results. Report the KO
+      // once and freeze; the actual round end is applied via applyRoundResult().
+      if (
+        !this.matchOver && !this.roundOver && !this.reportedKO &&
+        (this.p1.hp <= 0 || this.p2.hp <= 0)
+      ) {
+        const localLost = this.p1.hp <= 0;
+        this.reportedKO = true;
+        this.roundOver = true; // freeze the action while we wait for the server
+        this.targetTimeScale = 0.18;
+        this.shakeMag = 16;
+        this.hitFlash = 1;
+        const ko = this.p1.hp <= 0 ? this.p1 : this.p2;
+        const wn = this.p1.hp <= 0 ? this.p2 : this.p1;
+        ko.anim = "ko"; ko.animTime = 0; ko.vy = -10; ko.vx = -ko.facing * 6;
+        wn.anim = "win"; wn.animTime = 0;
+        Sfx.ko();
+        this.cb.onReportKO?.(localLost ? "self" : "opponent");
+      }
+    } else {
+      if (this.p1.hp <= 0 && !this.matchOver && !this.roundOver) this.endRound("p2");
+      else if (this.p2.hp <= 0 && !this.matchOver && !this.roundOver) this.endRound("p1");
+    }
+  }
+
+  // Called when the SERVER confirms a round result (online only). Keeps both
+  // clients perfectly in sync regardless of who detected the KO first.
+  applyRoundResult(localWon: boolean, p1Rounds: number, p2Rounds: number, matchOver: boolean) {
+    this.p1Rounds = p1Rounds;
+    this.p2Rounds = p2Rounds;
+    this.roundOver = true;
+    this.roundWinner = localWon ? "p1" : "p2";
+    this.victoryTimer = 0;
+    this.targetTimeScale = 0.18;
+    if (matchOver) {
+      this.matchOver = true;
+      this.winner = localWon ? "p1" : "p2";
+      if (localWon) setTimeout(() => Sfx.victory(), 700); // jingle only when YOU win
+      this.cb.onKO?.(this.winner);
+      setTimeout(() => { this.targetTimeScale = 1; }, 2600);
+    } else {
+      this.cb.onRoundEnd?.(localWon ? "p1" : "p2", p1Rounds, p2Rounds);
+      setTimeout(() => { this.targetTimeScale = 1; }, 1600);
+      setTimeout(() => this.startNextRound(), 2400);
+    }
   }
 
   // A single round ended. Award it; if someone reached roundsToWin, finish the
@@ -372,7 +466,7 @@ export class FightEngine {
       // final match victory — keep slow-mo + fire the win callback
       this.matchOver = true;
       this.winner = winner;
-      setTimeout(() => Sfx.victory(), 700);
+      if (winner === "p1") setTimeout(() => Sfx.victory(), 700); // jingle only when YOU win
       this.cb.onKO?.(winner);
       setTimeout(() => {
         this.targetTimeScale = 1;
@@ -405,16 +499,22 @@ export class FightEngine {
       st.hurtTime = 0;
       st.blocking = false;
       st.onGround = true;
+      st.specialUsed = false; // refill the once-per-round special for the new round
+      st.weaponEquipped = true; // weapon returns to hand each round
+      st.weaponThrown = false;
+      st.actionCd = 0;
     };
     reset(this.p1, 320, 1, this.p1Fighter.health);
     reset(this.p2, 960, -1, this.p2Fighter.health);
     this.beams = [];
+    this.thrownWeapons = [];
     this.roundTimer = this.roundTime;
     this.roundOver = false;
     this.roundWinner = null;
     this.victoryTimer = 0;
     this.targetTimeScale = 1;
     this.roundGrace = 90; // ~1.5s where stale remote HP is ignored
+    this.reportedKO = false; // ready to report the next round's KO
     this.cb.onRoundStart?.(this.currentRound);
   }
 
@@ -435,7 +535,7 @@ export class FightEngine {
     win.animTime = 0;
     this.burst(loser.x, loser.y + 60, 40, "#ffce3b");
     Sfx.ko();
-    setTimeout(() => Sfx.victory(), 700);
+    if (winner === "p1") setTimeout(() => Sfx.victory(), 700); // jingle only when YOU win
     this.cb.onKO?.(winner);
     // restore normal time after the dramatic slow-mo
     setTimeout(() => {
@@ -451,6 +551,7 @@ export class FightEngine {
     who: "p1" | "p2"
   ) {
     if (self.attackCd > 0) self.attackCd -= step;
+    if (self.actionCd > 0) self.actionCd -= step;
     if (self.hurtTime > 0) {
       self.hurtTime -= step;
       this.updateFighterPhysics(self, step, false);
@@ -462,7 +563,14 @@ export class FightEngine {
     self.blocking = inp.block && self.onGround;
 
     const attacking =
-      self.anim === "punch" || self.anim === "kick" || self.anim === "special";
+      self.anim === "punch" || self.anim === "kick" || self.anim === "special" ||
+      self.anim === "weaponAtk" || self.anim === "throw";
+
+    // ---- HOLSTER toggle (equip / put away the weapon) ----
+    if (inp.holster && self.actionCd <= 0 && !attacking && !self.weaponThrown) {
+      self.weaponEquipped = !self.weaponEquipped;
+      self.actionCd = 18;
+    }
 
     if (!attacking && !self.blocking) {
       let moving = false;
@@ -494,7 +602,25 @@ export class FightEngine {
 
     // attacks
     if (!attacking && self.attackCd <= 0 && self.onGround) {
-      if (inp.special && self.meter >= 50) {
+      const wpn = getWeapon(f.id);
+      const hasWeapon = self.weaponEquipped && !self.weaponThrown;
+      if (inp.throwWeapon && hasWeapon) {
+        // THROW the weapon — it's gone until the round ends (or pickup)
+        self.anim = "throw";
+        self.animTime = 0;
+        self.attackCd = 28;
+        this.throwWeaponProj(self, who, f);
+        self.weaponThrown = true;
+        self.weaponEquipped = false;
+      } else if (inp.weapon && hasWeapon) {
+        // melee swing WITH the weapon (more damage + reach than a punch)
+        self.anim = "weaponAtk";
+        self.animTime = 0;
+        self.attackCd = 28;
+        Sfx.kick();
+        this.scheduleHit(self, foe, who, f, wpn.meleeDmg + 8, wpn.reach);
+      } else if (inp.special && self.meter >= 50) {
+        // Special can be fired as many times as the meter allows (refills over time).
         self.anim = "special";
         self.animTime = 0;
         self.attackCd = 45;
@@ -523,7 +649,9 @@ export class FightEngine {
     if (
       (self.anim === "punch" && self.animTime > 18) ||
       (self.anim === "kick" && self.animTime > 24) ||
-      (self.anim === "special" && self.animTime > 50)
+      (self.anim === "special" && self.animTime > 50) ||
+      (self.anim === "weaponAtk" && self.animTime > 26) ||
+      (self.anim === "throw" && self.animTime > 22)
     ) {
       self.anim = self.onGround ? "idle" : "jump";
     }
@@ -535,15 +663,19 @@ export class FightEngine {
     who: "p1" | "p2",
     f: Fighter,
     baseDmg: number,
-    _range: number
+    extraReach = 0
   ) {
     // resolve a few frames into the swing
     const delay = 8;
     setTimeout(() => {
-      if (this.matchOver) return;
-      const reach = FIGHTER_W + 24;
-      const dx = (foe.x - self.x) * self.facing;
-      const close = dx > 0 && dx < reach && Math.abs(foe.y - self.y) < 120;
+      if (this.matchOver || this.roundOver) return;
+      const reach = FIGHTER_W + 28 + extraReach;
+      // Use absolute horizontal gap so hits land even when the fighters are
+      // pressed right up against each other (overlapping). Only require the
+      // foe to be roughly in front (or overlapping) and at a similar height.
+      const gap = Math.abs(foe.x - self.x);
+      const inFront = (foe.x - self.x) * self.facing > -FIGHTER_W; // in front OR overlapping
+      const close = gap < reach && inFront && Math.abs(foe.y - self.y) < 130;
       if (close) {
         this.applyDamage(foe, self, baseDmg * f.power, who);
       }
@@ -603,6 +735,28 @@ export class FightEngine {
     });
   }
 
+  // Online: visual-only thrown weapon from the remote opponent. Damage to us
+  // arrives separately via the "opp:hit" network event.
+  spawnRemoteWeapon() {
+    const f = this.p2Fighter;
+    const wpn = getWeapon(f.id);
+    this.thrownWeapons.push({
+      x: this.p2.x + this.p2.facing * 50,
+      y: this.p2.y + 56,
+      vx: this.p2.facing * 16,
+      vy: -2,
+      dir: this.p2.facing,
+      rot: 0,
+      spin: spinsInFlight(wpn.type) ? this.p2.facing * 0.5 : 0,
+      spins: spinsInFlight(wpn.type),
+      owner: "p2",
+      fighterId: f.id,
+      dmg: 0, // no local damage; authoritative damage comes over the network
+      hit: false,
+      life: 90,
+    });
+  }
+
   // Online: visual-only beam fired by the remote opponent (p2). Damage to us
   // is delivered separately via receiveDamage() / the "opp:hit" event.
   spawnRemoteBeam() {
@@ -636,6 +790,74 @@ export class FightEngine {
       color: f.specialColor,
       size: 36,
     });
+  }
+
+  // Launch the equipped weapon as a projectile toward the foe.
+  throwWeaponProj(self: FighterState, who: "p1" | "p2", f: Fighter) {
+    const wpn = getWeapon(f.id);
+    this.shakeMag = Math.max(this.shakeMag, 6);
+    Sfx.special();
+    this.thrownWeapons.push({
+      x: self.x + self.facing * 50,
+      y: self.y + 56,
+      vx: self.facing * 16,
+      vy: -2,
+      dir: self.facing,
+      rot: 0,
+      spin: spinsInFlight(wpn.type) ? self.facing * 0.5 : 0,
+      spins: spinsInFlight(wpn.type),
+      owner: who,
+      fighterId: f.id,
+      dmg: wpn.throwDmg * f.power,
+      hit: false,
+      life: 90,
+    });
+  }
+
+  updateThrownWeapons(step: number) {
+    const targetFor = (o: "p1" | "p2") => (o === "p1" ? this.p2 : this.p1);
+    const ownerFor = (o: "p1" | "p2") => (o === "p1" ? this.p1 : this.p2);
+    for (let i = this.thrownWeapons.length - 1; i >= 0; i--) {
+      const tw = this.thrownWeapons[i];
+      tw.x += tw.vx * step;
+      tw.y += tw.vy * step;
+      tw.vy += 0.18 * step; // slight gravity arc
+      tw.rot += tw.spin * step;
+      tw.life -= step;
+
+      // sparkle trail
+      if (Math.random() < 0.6) {
+        const w = getWeapon(tw.fighterId);
+        this.particles.push({
+          x: tw.x, y: tw.y,
+          vx: -tw.dir * Math.random() * 2, vy: (Math.random() - 0.5) * 3,
+          life: 12 + Math.random() * 10, maxLife: 22,
+          color: w.trail, size: 3 + Math.random() * 4,
+        });
+      }
+
+      if (!tw.hit) {
+        const foe = targetFor(tw.owner);
+        const self = ownerFor(tw.owner);
+        const dx = (tw.x - foe.x) * tw.dir;
+        const close = dx > -FIGHTER_W * 0.6 && dx < FIGHTER_W * 0.6 &&
+          Math.abs(tw.y - (foe.y + 70)) < FIGHTER_H * 0.55;
+        if (close) {
+          tw.hit = true;
+          if (!this.isOnline || tw.owner === "p1") {
+            this.applyDamage(foe, self, tw.dmg, tw.owner, true);
+          }
+          const w = getWeapon(tw.fighterId);
+          this.burst(tw.x, foe.y + 60, 22, w.trail);
+          this.shakeMag = Math.max(this.shakeMag, 14);
+          tw.life = 0;
+        }
+      }
+
+      if (tw.life <= 0 || tw.x < -80 || tw.x > WORLD.w + 80 || tw.y > GROUND_Y + 40) {
+        this.thrownWeapons.splice(i, 1);
+      }
+    }
   }
 
   updateBeams(step: number) {
@@ -796,24 +1018,62 @@ export class FightEngine {
   }
 
   aiControl(self: FighterState, foe: FighterState, _step: number) {
-    if (this.matchOver) return;
-    const dist = (foe.x - self.x) * self.facing;
+    if (this.matchOver || this.roundOver) {
+      this.remoteInput = { ...EMPTY_INPUT };
+      return;
+    }
+    const gap = Math.abs(foe.x - self.x);     // horizontal distance to player
+    const HIT_RANGE = 80;                      // close enough to land a punch/kick
     const r = { ...EMPTY_INPUT };
-    if (Math.abs(dist) > 130) {
+
+    // AI "think" timer so it commits to an action for a few frames instead of
+    // flickering inputs every single frame (which made attacks never fire).
+    this.aiTimer -= 1;
+
+    if (this.aiTimer <= 0) {
+      // pick a new decision
+      if (gap > HIT_RANGE) {
+        this.aiAction = "approach";
+        this.aiTimer = 6;
+      } else {
+        // in striking range — choose an attack and hold it briefly
+        const roll = Math.random();
+        if (self.meter >= 50 && roll > 0.85) this.aiAction = "special";
+        else if (roll > 0.55) this.aiAction = "punch";
+        else if (roll > 0.30) this.aiAction = "kick";
+        else if (roll > 0.18) this.aiAction = "block";
+        else if (roll > 0.10) this.aiAction = "retreat";
+        else this.aiAction = "jump";
+        this.aiTimer = 10 + Math.floor(Math.random() * 10);
+      }
+    }
+
+    // close the gap whenever out of range, regardless of the current action
+    if (gap > HIT_RANGE && this.aiAction !== "block") {
       if (foe.x > self.x) r.right = true;
       else r.left = true;
-    } else {
-      // in range — decide
-      const roll = Math.random();
-      if (self.meter >= 50 && roll > 0.97) r.special = true;
-      else if (roll > 0.93) r.punch = true;
-      else if (roll > 0.89) r.kick = true;
-      else if (roll > 0.86) r.block = true;
-      else if (roll > 0.84) r.jump = true;
     }
-    // dodge when foe attacks
-    if ((foe.anim === "punch" || foe.anim === "special") && Math.random() > 0.6)
+
+    // execute the committed action
+    switch (this.aiAction) {
+      case "punch": if (gap <= HIT_RANGE + 10) r.punch = true; break;
+      case "kick": if (gap <= HIT_RANGE + 14) r.kick = true; break;
+      case "special": if (self.meter >= 50) r.special = true; break;
+      case "jump": r.jump = true; break;
+      case "block": r.block = true; break;
+      case "retreat":
+        if (foe.x > self.x) r.left = true; else r.right = true;
+        break;
+    }
+
+    // reactive block when the player throws a heavy move (some of the time)
+    if (
+      (foe.anim === "special" || foe.anim === "throw") &&
+      Math.random() > 0.5
+    ) {
       r.block = true;
+    }
+
     this.remoteInput = r;
   }
 
@@ -875,6 +1135,7 @@ export class FightEngine {
     this.drawFighter(ctx, this.p2, this.p2Fighter);
     this.drawFighter(ctx, this.p1, this.p1Fighter);
     this.drawBeams(ctx);
+    this.drawThrownWeapons(ctx);
     this.drawParticles(ctx);
     this.drawTexts(ctx);
 
@@ -1272,6 +1533,7 @@ export class FightEngine {
   }
 
   drawFighter(ctx: CanvasRenderingContext2D, s: FighterState, f: Fighter) {
+    const build = getBuild(f.id);
     ctx.save();
     ctx.translate(s.x, s.y);
     const dir = s.facing;
@@ -1280,17 +1542,30 @@ export class FightEngine {
     const t = s.animTime;
     const w = FIGHTER_W;
     const h = FIGHTER_H;
+    const bulk = build.bulk;       // limb/torso width multiplier
+    const hs = build.headScale;    // head size multiplier
 
-    // shadow
+    // shadow (sized to the build so big fighters cast bigger shadows)
     ctx.save();
     ctx.scale(dir, 1);
     ctx.globalAlpha = 0.3;
     ctx.fillStyle = "#000";
     ctx.beginPath();
     const groundOff = GROUND_Y - FIGHTER_H - s.y;
-    ctx.ellipse(0, h + groundOff, 38, 10, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, h + groundOff, 38 * build.scale * bulk, 10, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
+
+    // overall body scale (anchored at the feet) + opacity for ghostly fighters
+    ctx.translate(0, h);
+    ctx.scale(build.scale, build.scale);
+    ctx.translate(0, -h);
+    ctx.globalAlpha = build.alpha;
+    // silhouette glow for aura/ghost/holy fighters
+    if (build.extra === "aura" || build.glow) {
+      ctx.shadowColor = build.glow || f.specialColor;
+      ctx.shadowBlur = 18;
+    }
 
     // aura when meter high or special
     if (s.meter >= 100 || s.anim === "special") {
@@ -1422,6 +1697,76 @@ export class FightEngine {
     ctx.translate(0, crouch);
     const hipY = h - 62;
     const shoulderY = hipY - 56;
+    const headY = shoulderY - 30;
+
+    // ============ BACK-LAYER EXTRAS (behind the body) ============
+    if (build.extra === "tail") {
+      // dino/dragon tail swaying behind
+      const sway = Math.sin(t * 0.12 + this.bgTime * 0.4) * 18;
+      ctx.save();
+      ctx.fillStyle = shade(body, -12);
+      ctx.beginPath();
+      ctx.moveTo(-10, hipY - 4);
+      ctx.quadraticCurveTo(-52, hipY + 6 + sway * 0.4, -78, hipY - 18 + sway);
+      ctx.quadraticCurveTo(-54, hipY + 22 + sway * 0.4, -10, hipY + 12);
+      ctx.closePath();
+      ctx.fill();
+      // tail spikes
+      ctx.fillStyle = accent;
+      for (let i = 1; i <= 3; i++) {
+        const tx = -10 - i * 18;
+        const ty = hipY - 4 + (sway * i) / 4;
+        ctx.beginPath();
+        ctx.moveTo(tx, ty - 2);
+        ctx.lineTo(tx - 4, ty - 12);
+        ctx.lineTo(tx + 6, ty - 4);
+        ctx.closePath();
+        ctx.fill();
+      }
+      ctx.restore();
+    } else if (build.extra === "cape") {
+      const sway = Math.sin(t * 0.12 + this.bgTime * 0.3) * 10;
+      ctx.save();
+      ctx.fillStyle = shade(accent, -22);
+      ctx.beginPath();
+      ctx.moveTo(-20, shoulderY - 2);
+      ctx.lineTo(20, shoulderY - 2);
+      ctx.quadraticCurveTo(34 + sway, hipY + 30, 10 + sway, h - 6);
+      ctx.lineTo(-26 + sway, h - 6);
+      ctx.quadraticCurveTo(-34 + sway, hipY + 20, -20, shoulderY - 2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    } else if (build.extra === "wings") {
+      const flap = Math.sin(this.bgTime * 0.8) * 0.25;
+      ctx.save();
+      ctx.fillStyle = build.glow || "#ffffff";
+      ctx.globalAlpha = build.alpha * 0.85;
+      for (const sgn of [-1, 1]) {
+        ctx.save();
+        ctx.translate(sgn * 8, shoulderY + 4);
+        ctx.rotate(sgn * (0.5 + flap));
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.quadraticCurveTo(sgn * 30, -30, sgn * 18, -64);
+        ctx.quadraticCurveTo(sgn * 8, -36, 0, 0);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      }
+      ctx.restore();
+    }
+    if (build.extra === "halo") {
+      ctx.save();
+      ctx.strokeStyle = build.glow || "#ffd23b";
+      ctx.shadowColor = build.glow || "#ffd23b";
+      ctx.shadowBlur = 14;
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.ellipse(2, headY - 26, 16, 5, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
 
     // ============ LEGS (drawn first, behind torso) ============
     if (s.anim === "kick") {
@@ -1487,23 +1832,40 @@ export class FightEngine {
       backArm(-2, shoulderY + 6, 6, shoulderY - 16 + gb, true);
     }
 
-    // ---- TORSO (costume) ----
+    // ---- TORSO (costume) ---- (width scales with the fighter's bulk)
+    const tw = 24 * bulk; // torso half-width
     // main body suit
     ctx.fillStyle = body;
-    roundRect(ctx, -24, shoulderY - 4, 48, hipY - shoulderY + 12, 14);
+    roundRect(ctx, -tw, shoulderY - 4, tw * 2, hipY - shoulderY + 12, 14);
     ctx.fill();
     // chest shading
     ctx.fillStyle = shade(body, -12);
-    roundRect(ctx, 6, shoulderY - 2, 16, hipY - shoulderY + 8, 10);
+    roundRect(ctx, tw * 0.25, shoulderY - 2, tw * 0.66, hipY - shoulderY + 8, 10);
     ctx.fill();
+    // muscle/abs definition for bulky fighters
+    if (bulk >= 1.2) {
+      ctx.strokeStyle = "rgba(0,0,0,0.18)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(0, shoulderY + 16);
+      ctx.lineTo(0, hipY - 6);
+      ctx.stroke();
+      for (let ab = 0; ab < 3; ab++) {
+        const ay = shoulderY + 24 + ab * 12;
+        ctx.beginPath();
+        ctx.moveTo(-tw * 0.5, ay);
+        ctx.lineTo(tw * 0.5, ay);
+        ctx.stroke();
+      }
+    }
     // chest plate / costume accent panel
     ctx.fillStyle = accent;
-    roundRect(ctx, -22, shoulderY - 2, 44, 18, 8);
+    roundRect(ctx, -tw + 2, shoulderY - 2, tw * 2 - 4, 18, 8);
     ctx.fill();
     // diagonal sash
     ctx.fillStyle = shade(accent, 18);
     ctx.beginPath();
-    ctx.moveTo(-22, shoulderY + 14);
+    ctx.moveTo(-tw, shoulderY + 14);
     ctx.lineTo(-6, shoulderY + 14);
     ctx.lineTo(14, hipY - 2);
     ctx.lineTo(-2, hipY - 2);
@@ -1511,21 +1873,38 @@ export class FightEngine {
     ctx.fill();
     // belt
     ctx.fillStyle = "#222";
-    roundRect(ctx, -24, hipY - 8, 48, 12, 4);
+    roundRect(ctx, -tw, hipY - 8, tw * 2, 12, 4);
     ctx.fill();
     ctx.fillStyle = accent;
     roundRect(ctx, -7, hipY - 7, 14, 10, 3); // buckle
     ctx.fill();
-    // shoulder pads
+    // shoulder pads (with spikes for heavy/brute builds)
     ctx.fillStyle = shade(accent, -8);
-    blob(-18, shoulderY + 2, 10, shade(accent, -8));
-    blob(18, shoulderY + 2, 10, shade(accent, -8));
+    blob(-tw + 6, shoulderY + 2, 10 * bulk, shade(accent, -8));
+    blob(tw - 6, shoulderY + 2, 10 * bulk, shade(accent, -8));
+    if (build.extra === "shoulderSpikes") {
+      ctx.fillStyle = shade(accent, 20);
+      for (const sx of [-tw + 6, tw - 6]) {
+        ctx.beginPath();
+        ctx.moveTo(sx - 8, shoulderY - 2);
+        ctx.lineTo(sx, shoulderY - 18);
+        ctx.lineTo(sx + 8, shoulderY - 2);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
 
     // ---- NECK + HEAD ----
     ctx.fillStyle = skin;
     roundRect(ctx, -7, shoulderY - 16, 14, 16, 5); // neck
     ctx.fill();
-    const headY = shoulderY - 30;
+    // (headY declared earlier near the back-layer extras)
+    // The whole head (+hair) is scaled by hs so big/small heads read clearly.
+    ctx.save();
+    ctx.translate(2, headY);
+    ctx.scale(hs, hs);
+    ctx.translate(-2, -headY);
+
     // face
     ctx.fillStyle = skin;
     ctx.beginPath();
@@ -1536,24 +1915,10 @@ export class FightEngine {
     ctx.beginPath();
     ctx.arc(2, headY + 4, 17, 0.2, Math.PI - 0.2);
     ctx.fill();
-    // hair (spiky, DBZ-style)
-    ctx.fillStyle = f.accent;
-    ctx.beginPath();
-    ctx.moveTo(-15, headY - 4);
-    ctx.lineTo(-18, headY - 22);
-    ctx.lineTo(-6, headY - 14);
-    ctx.lineTo(-2, headY - 28);
-    ctx.lineTo(6, headY - 14);
-    ctx.lineTo(12, headY - 26);
-    ctx.lineTo(15, headY - 8);
-    ctx.lineTo(18, headY - 2);
-    ctx.lineTo(-15, headY - 2);
-    ctx.closePath();
-    ctx.fill();
-    // headband
-    ctx.fillStyle = body;
-    roundRect(ctx, -16, headY - 6, 36, 7, 3);
-    ctx.fill();
+
+    // ---- HAIR / HEADGEAR by style ----
+    this.drawHair(ctx, build.hair, headY, f.accent, body, accent);
+
     // eye + brow (facing forward = +x because we already scaled by dir)
     ctx.fillStyle = "#fff";
     ctx.beginPath();
@@ -1570,36 +1935,361 @@ export class FightEngine {
     ctx.lineTo(14, headY - 5);
     ctx.stroke();
 
+    ctx.restore(); // head scale
+
     // ---- FRONT ARM ----
-    if (s.anim === "punch" || s.anim === "special") {
+    const hasWeapon = s.weaponEquipped && !s.weaponThrown;
+    const wpn = getWeapon(f.id);
+    // helper: draw the held weapon from the hand, angled `ang`, scaled to its length
+    const drawHeld = (hx: number, hy: number, ang: number) => {
+      ctx.save();
+      ctx.translate(hx, hy);
+      ctx.rotate(ang);
+      this.drawWeaponShape(ctx, f.id, wpn.length);
+      ctx.restore();
+    };
+
+    if (s.anim === "weaponAtk") {
+      // big overhead/forward weapon swing
+      const sw = Math.min(1, t / 10);
+      const ang = -1.1 + sw * 1.7; // arc down
+      const hx = 22, hy = shoulderY - 4;
+      bone(8, shoulderY + 4, 18, shoulderY, 14, body);
+      bone(18, shoulderY, hx, hy, 12, skin);
+      drawFist(hx, hy, 10);
+      drawHeld(hx + 4, hy, ang);
+    } else if (s.anim === "throw") {
+      // throwing motion (arm whips forward)
+      const sw = Math.min(1, t / 8);
+      const px = 14 + sw * 40;
+      bone(8, shoulderY + 4, px * 0.6, shoulderY + 4, 14, body);
+      bone(px * 0.6, shoulderY + 4, px, shoulderY + 4, 12, skin);
+      drawFist(px + 8, shoulderY + 4, 10);
+    } else if (s.anim === "punch" || s.anim === "special") {
       const reach = s.anim === "special" ? 78 : 50;
       const px = 14 + armPunch * reach;
       bone(8, shoulderY + 4, px * 0.55, shoulderY + 6, 14, body);     // upper
       bone(px * 0.55, shoulderY + 6, px, shoulderY + 6, 12, skin);    // forearm
       drawFist(px + 8, shoulderY + 6, 11);                            // fist
       if (s.anim === "special") {
-        // energy in the fist
         blob(px + 12, shoulderY + 6, 9 + 4 * Math.sin(t), f.specialColor);
       }
     } else if (s.anim === "block") {
       bone(8, shoulderY + 4, 16, shoulderY - 8, 14, body);
       bone(16, shoulderY - 8, 18, shoulderY - 24, 12, skin);
       drawFist(18, shoulderY - 28, 11);
+      if (hasWeapon) drawHeld(18, shoulderY - 28, -0.5);
     } else if (s.anim === "win") {
       bone(8, shoulderY + 4, 14, shoulderY - 22, 14, body);
       bone(14, shoulderY - 22, 16, shoulderY - 46 + bob, 12, skin);
       drawFist(16, shoulderY - 52 + bob, 11);
+      if (hasWeapon) drawHeld(16, shoulderY - 52 + bob, -1.4);
     } else {
-      // IDLE / WALK: lead fist raised forward in a guard (elbow tucked, fist up)
+      // IDLE / WALK: lead hand forward; weapon points forward if equipped
       const gb = s.anim === "walk" ? Math.sin(t * 0.4) * 2.5 : bob * 0.6;
-      bone(8, shoulderY + 4, 20, shoulderY + 6, 14, body);      // upper arm out
-      bone(20, shoulderY + 6, 30, shoulderY - 12 + gb, 12, skin); // forearm up
-      drawFist(33, shoulderY - 17 + gb, 11);                    // raised lead fist
+      const hx = 30, hy = shoulderY - 12 + gb;
+      bone(8, shoulderY + 4, 20, shoulderY + 6, 14, body);
+      bone(20, shoulderY + 6, hx, hy, 12, skin);
+      drawFist(hx + 3, hy - 5, 11);
+      if (hasWeapon) drawHeld(hx + 3, hy - 5, -0.35);
     }
 
     ctx.restore(); // torso group
 
     ctx.restore(); // fighter
+  }
+
+  // Draw a fighter's hair / headgear in local head coordinates (centered ~headY).
+  drawHair(
+    ctx: CanvasRenderingContext2D,
+    style: string,
+    headY: number,
+    hairCol: string,
+    body: string,
+    accent: string
+  ) {
+    const spikes = () => {
+      ctx.fillStyle = hairCol;
+      ctx.beginPath();
+      ctx.moveTo(-15, headY - 4);
+      ctx.lineTo(-18, headY - 22);
+      ctx.lineTo(-6, headY - 14);
+      ctx.lineTo(-2, headY - 28);
+      ctx.lineTo(6, headY - 14);
+      ctx.lineTo(12, headY - 26);
+      ctx.lineTo(15, headY - 8);
+      ctx.lineTo(18, headY - 2);
+      ctx.lineTo(-15, headY - 2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = body;
+      roundRect(ctx, -16, headY - 6, 36, 7, 3);
+      ctx.fill();
+    };
+
+    switch (style) {
+      case "spiky":
+        spikes();
+        break;
+      case "flame": {
+        // wild flickering flame-hair
+        ctx.fillStyle = hairCol;
+        ctx.shadowColor = hairCol;
+        ctx.shadowBlur = 12;
+        ctx.beginPath();
+        ctx.moveTo(-16, headY - 2);
+        for (let i = 0; i <= 6; i++) {
+          const fx = -16 + (i / 6) * 32;
+          const fl = 18 + Math.sin(this.bgTime * 1.5 + i) * 8;
+          ctx.lineTo(fx - 3, headY - 10 - fl);
+          ctx.lineTo(fx + 3, headY - 6);
+        }
+        ctx.lineTo(18, headY - 2);
+        ctx.closePath();
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        break;
+      }
+      case "long":
+        // flowing long hair (frames the face + down the back)
+        ctx.fillStyle = hairCol;
+        ctx.beginPath();
+        ctx.arc(2, headY - 6, 19, Math.PI, 0);
+        ctx.lineTo(20, headY + 30);
+        ctx.lineTo(12, headY + 30);
+        ctx.lineTo(14, headY);
+        ctx.lineTo(-14, headY);
+        ctx.lineTo(-20, headY + 34);
+        ctx.lineTo(-22, headY - 4);
+        ctx.closePath();
+        ctx.fill();
+        break;
+      case "mohawk":
+        ctx.fillStyle = hairCol;
+        for (let i = 0; i < 5; i++) {
+          ctx.beginPath();
+          ctx.moveTo(-8 + i * 4, headY - 8);
+          ctx.lineTo(-6 + i * 4, headY - 30 + (i % 2) * 6);
+          ctx.lineTo(-4 + i * 4, headY - 8);
+          ctx.closePath();
+          ctx.fill();
+        }
+        break;
+      case "bald":
+        // just a subtle scalp highlight
+        ctx.fillStyle = "rgba(255,255,255,0.12)";
+        ctx.beginPath();
+        ctx.arc(-2, headY - 8, 7, 0, Math.PI * 2);
+        ctx.fill();
+        break;
+      case "hood":
+        ctx.fillStyle = shade(body, -20);
+        ctx.beginPath();
+        ctx.arc(2, headY - 2, 21, Math.PI * 1.05, Math.PI * 1.95);
+        ctx.lineTo(20, headY - 4);
+        ctx.lineTo(-18, headY - 4);
+        ctx.closePath();
+        ctx.fill();
+        // face shadow under hood
+        ctx.fillStyle = "rgba(0,0,0,0.35)";
+        ctx.beginPath();
+        ctx.arc(2, headY, 14, 0, Math.PI * 2);
+        ctx.fill();
+        break;
+      case "horns":
+        spikes();
+        ctx.fillStyle = shade(accent, 15);
+        for (const sgn of [-1, 1]) {
+          ctx.beginPath();
+          ctx.moveTo(sgn * 12, headY - 14);
+          ctx.quadraticCurveTo(sgn * 26, headY - 24, sgn * 20, headY - 40);
+          ctx.quadraticCurveTo(sgn * 16, headY - 22, sgn * 8, headY - 16);
+          ctx.closePath();
+          ctx.fill();
+        }
+        break;
+      case "topknot":
+        ctx.fillStyle = hairCol;
+        ctx.beginPath();
+        ctx.arc(2, headY - 8, 16, Math.PI, 0);
+        ctx.fill();
+        // bun
+        ctx.beginPath();
+        ctx.arc(2, headY - 26, 7, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = body;
+        roundRect(ctx, -16, headY - 6, 36, 6, 3);
+        ctx.fill();
+        break;
+      case "crown":
+        ctx.fillStyle = hairCol;
+        ctx.beginPath();
+        ctx.arc(2, headY - 6, 18, Math.PI, 0);
+        ctx.fill();
+        ctx.fillStyle = "#ffd23b";
+        ctx.beginPath();
+        ctx.moveTo(-14, headY - 14);
+        ctx.lineTo(-14, headY - 26);
+        ctx.lineTo(-7, headY - 18);
+        ctx.lineTo(2, headY - 30);
+        ctx.lineTo(11, headY - 18);
+        ctx.lineTo(18, headY - 26);
+        ctx.lineTo(18, headY - 14);
+        ctx.closePath();
+        ctx.fill();
+        break;
+      case "helmet":
+        ctx.fillStyle = shade(accent, -6);
+        ctx.beginPath();
+        ctx.arc(2, headY - 2, 19, Math.PI, 0);
+        ctx.lineTo(20, headY + 6);
+        ctx.lineTo(-16, headY + 6);
+        ctx.closePath();
+        ctx.fill();
+        // visor slit
+        ctx.fillStyle = "#1a1a1a";
+        roundRect(ctx, -12, headY - 4, 28, 6, 2);
+        ctx.fill();
+        // crest
+        ctx.fillStyle = hairCol;
+        roundRect(ctx, 0, headY - 30, 4, 26, 2);
+        ctx.fill();
+        break;
+      case "antenna":
+        spikes();
+        ctx.strokeStyle = accent;
+        ctx.lineWidth = 2;
+        for (const sgn of [-1, 1]) {
+          ctx.beginPath();
+          ctx.moveTo(sgn * 6, headY - 16);
+          ctx.quadraticCurveTo(sgn * 18, headY - 34, sgn * 10, headY - 44);
+          ctx.stroke();
+          ctx.fillStyle = accent;
+          ctx.beginPath();
+          ctx.arc(sgn * 10, headY - 44, 3, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        break;
+      default:
+        spikes();
+    }
+  }
+
+  // Draw a weapon silhouette at the current origin, pointing toward +x.
+  drawWeaponShape(ctx: CanvasRenderingContext2D, fighterId: string, len: number) {
+    const w = getWeapon(fighterId);
+    const c = w.color;
+    const dark = shade(c, -25);
+    const handle = "#5a3a1a";
+    ctx.lineCap = "round";
+    switch (w.type) {
+      case "katana":
+      case "sword":
+      case "blade" as any: {
+        ctx.fillStyle = handle; roundRect(ctx, -10, -2.5, 12, 5, 2); ctx.fill();
+        ctx.fillStyle = dark; roundRect(ctx, 2, -4, 6, 8, 2); ctx.fill(); // guard
+        const grad = ctx.createLinearGradient(8, 0, len, 0);
+        grad.addColorStop(0, c); grad.addColorStop(1, "#ffffff");
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.moveTo(8, -3); ctx.lineTo(len - 6, w.type === "katana" ? -5 : -3);
+        ctx.lineTo(len, 0); ctx.lineTo(8, 3); ctx.closePath(); ctx.fill();
+        break;
+      }
+      case "dagger": {
+        ctx.fillStyle = handle; roundRect(ctx, -8, -2, 9, 4, 2); ctx.fill();
+        ctx.fillStyle = c;
+        ctx.beginPath(); ctx.moveTo(2, -3); ctx.lineTo(len, 0); ctx.lineTo(2, 3); ctx.closePath(); ctx.fill();
+        break;
+      }
+      case "axe": {
+        ctx.strokeStyle = handle; ctx.lineWidth = 5;
+        ctx.beginPath(); ctx.moveTo(-12, 0); ctx.lineTo(len * 0.7, 0); ctx.stroke();
+        ctx.fillStyle = c;
+        ctx.beginPath();
+        ctx.moveTo(len * 0.55, -4); ctx.quadraticCurveTo(len, -22, len + 4, 0);
+        ctx.quadraticCurveTo(len, 22, len * 0.55, 4); ctx.closePath(); ctx.fill();
+        break;
+      }
+      case "hammer": {
+        ctx.strokeStyle = handle; ctx.lineWidth = 6;
+        ctx.beginPath(); ctx.moveTo(-12, 0); ctx.lineTo(len * 0.7, 0); ctx.stroke();
+        ctx.fillStyle = c; roundRect(ctx, len * 0.6, -16, 22, 32, 4); ctx.fill();
+        ctx.fillStyle = dark; roundRect(ctx, len * 0.6, -16, 6, 32, 4); ctx.fill();
+        break;
+      }
+      case "club": {
+        ctx.strokeStyle = handle; ctx.lineWidth = 6;
+        ctx.beginPath(); ctx.moveTo(-12, 0); ctx.lineTo(len * 0.55, 0); ctx.stroke();
+        ctx.fillStyle = c;
+        ctx.beginPath(); ctx.ellipse(len * 0.8, 0, len * 0.28, 14, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = dark;
+        for (let k = 0; k < 4; k++) { ctx.beginPath(); ctx.arc(len * 0.7 + k * 8, (k % 2 ? -8 : 8), 3, 0, Math.PI * 2); ctx.fill(); }
+        break;
+      }
+      case "spear":
+      case "trident":
+      case "bo": {
+        ctx.strokeStyle = handle; ctx.lineWidth = 5;
+        ctx.beginPath(); ctx.moveTo(-len * 0.4, 0); ctx.lineTo(len * 0.8, 0); ctx.stroke();
+        ctx.fillStyle = c;
+        ctx.beginPath(); ctx.moveTo(len * 0.78, -5); ctx.lineTo(len + 6, 0); ctx.lineTo(len * 0.78, 5); ctx.closePath(); ctx.fill();
+        if (w.type === "trident") {
+          ctx.fillStyle = c;
+          for (const oy of [-10, 10]) { ctx.beginPath(); ctx.moveTo(len * 0.82, oy); ctx.lineTo(len + 2, oy * 0.4); ctx.lineTo(len * 0.82, oy * 0.2); ctx.closePath(); ctx.fill(); }
+        }
+        break;
+      }
+      case "scythe": {
+        ctx.strokeStyle = handle; ctx.lineWidth = 5;
+        ctx.beginPath(); ctx.moveTo(-len * 0.4, 0); ctx.lineTo(len * 0.85, 0); ctx.stroke();
+        ctx.strokeStyle = c; ctx.lineWidth = 6;
+        ctx.beginPath(); ctx.arc(len * 0.85, -2, 22, Math.PI * 1.1, Math.PI * 1.9); ctx.stroke();
+        break;
+      }
+      case "staff": {
+        ctx.strokeStyle = handle; ctx.lineWidth = 5;
+        ctx.beginPath(); ctx.moveTo(-len * 0.4, 0); ctx.lineTo(len * 0.8, 0); ctx.stroke();
+        ctx.shadowColor = w.trail; ctx.shadowBlur = 16;
+        ctx.fillStyle = c; ctx.beginPath(); ctx.arc(len * 0.9, 0, 9, 0, Math.PI * 2); ctx.fill();
+        ctx.shadowBlur = 0;
+        break;
+      }
+      case "shuriken":
+      case "chakram": {
+        ctx.fillStyle = c; ctx.shadowColor = w.trail; ctx.shadowBlur = 12;
+        if (w.type === "shuriken") {
+          for (let k = 0; k < 4; k++) {
+            ctx.save(); ctx.rotate((k * Math.PI) / 2);
+            ctx.beginPath(); ctx.moveTo(0, -4); ctx.lineTo(len * 0.5, 0); ctx.lineTo(0, 4); ctx.closePath(); ctx.fill();
+            ctx.restore();
+          }
+        } else {
+          ctx.lineWidth = 5; ctx.strokeStyle = c;
+          ctx.beginPath(); ctx.arc(0, 0, len * 0.4, 0, Math.PI * 2); ctx.stroke();
+        }
+        ctx.shadowBlur = 0;
+        break;
+      }
+      default: {
+        ctx.fillStyle = c;
+        ctx.beginPath(); ctx.moveTo(0, -3); ctx.lineTo(len, 0); ctx.lineTo(0, 3); ctx.closePath(); ctx.fill();
+      }
+    }
+  }
+
+  drawThrownWeapons(ctx: CanvasRenderingContext2D) {
+    for (const tw of this.thrownWeapons) {
+      ctx.save();
+      ctx.translate(tw.x, tw.y);
+      ctx.scale(tw.dir, 1);
+      ctx.rotate(tw.spins ? tw.rot : 0);
+      const w = getWeapon(tw.fighterId);
+      ctx.shadowColor = w.trail;
+      ctx.shadowBlur = 14;
+      this.drawWeaponShape(ctx, tw.fighterId, w.length);
+      ctx.restore();
+    }
   }
 
   drawBeams(ctx: CanvasRenderingContext2D) {

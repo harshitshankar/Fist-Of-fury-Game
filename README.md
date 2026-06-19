@@ -17,10 +17,16 @@ service** you can push to GitHub and deploy to **Render** in minutes.
 - **"Room is already full" protection** — every room holds **exactly 2 players**.
   A third player is rejected until someone leaves.
 - **24 unique fighters** — each with their own stats, fighting style, signature
-  special move and uniquely-colored energy beam (Blaze 🔥, Frost ❄️, Volt ⚡,
-  Venom 🐍, Titan 🛡️, Nova 🌟, Ronin ⚔️, Magma 🌋, Tempest 🌪️, Obsidian 🖤,
-  Seraph 👼, Reaper 💀, Aqua 🌊, Phantom 👻, Inferna 💃, Goliath 🦏, Spark 🛹,
-  Kaiju 🦖, Mystic 🔮, Blade 🗡️, Lumen 🌈, Drakon 🐲, Celesta ✨, Ragnar 🪓).
+  special move, uniquely-colored energy beam AND a **distinct body silhouette**
+  (size, bulk, head shape, hair/headgear, and extras like tails, capes, wings,
+  halos, horns, shoulder-spikes or ghostly transparency). E.g. Goliath 🦏 &
+  Titan 🛡️ are massive bulky bruisers, Phantom 👻 is translucent, Kaiju 🦖 &
+  Drakon 🐲 have swaying tails, Seraph 👼 has wings, Celesta ✨ a halo, Reaper 💀
+  & Mystic 🔮 wear hooded capes, Blaze 🔥 has living flame hair. Full roster:
+  Blaze 🔥, Frost ❄️, Volt ⚡, Venom 🐍, Titan 🛡️, Nova 🌟, Ronin ⚔️, Magma 🌋,
+  Tempest 🌪️, Obsidian 🖤, Seraph 👼, Reaper 💀, Aqua 🌊, Phantom 👻, Inferna 💃,
+  Goliath 🦏, Spark 🛹, Kaiju 🦖, Mystic 🔮, Blade 🗡️, Lumen 🌈, Drakon 🐲,
+  Celesta ✨, Ragnar 🪓.
 - **24 detailed arenas** — Ancient Dojo, Neon City, Volcano Crater, Cosmic Void,
   Frozen Peaks, Grand Arena, Enchanted Forest, Desert Ruins, Cyber Grid, Deep
   Abyss, Dark Castle, Cursed Graveyard, Sky Sanctuary, Steel Factory, Jade

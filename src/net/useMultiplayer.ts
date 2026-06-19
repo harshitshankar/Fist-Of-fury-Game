@@ -46,6 +46,7 @@ export function useMultiplayer() {
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
   const onRemoteStateRef = useRef<((s: any) => void) | null>(null);
   const onRemoteHitRef = useRef<((d: any) => void) | null>(null);
+  const onRoundResultRef = useRef<((d: any) => void) | null>(null);
 
   const [state, setState] = useState<MpState>({
     connected: false,
@@ -130,6 +131,10 @@ export function useMultiplayer() {
 
     s.on("opp:hit", (d: any) => {
       onRemoteHitRef.current?.(d);
+    });
+
+    s.on("round:result", (d: any) => {
+      onRoundResultRef.current?.(d);
     });
 
     s.on("chat:msg", (m: ChatMsg) => {
@@ -245,6 +250,10 @@ export function useMultiplayer() {
     socketRef.current?.emit("p:hit", d);
   }, []);
 
+  const reportKO = useCallback((loserId: string, round: number) => {
+    socketRef.current?.emit("round:ko", { loserId, round });
+  }, []);
+
   const sendChat = useCallback((text: string) => {
     socketRef.current?.emit("chat:send", text);
   }, []);
@@ -273,6 +282,9 @@ export function useMultiplayer() {
   const setOnRemoteHit = useCallback((fn: (d: any) => void) => {
     onRemoteHitRef.current = fn;
   }, []);
+  const setOnRoundResult = useCallback((fn: (d: any) => void) => {
+    onRoundResultRef.current = fn;
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -290,11 +302,13 @@ export function useMultiplayer() {
     updateLoadout,
     sendState,
     sendHit,
+    reportKO,
     sendChat,
     leaveRoom,
     startVoice,
     setOnRemoteState,
     setOnRemoteHit,
+    setOnRoundResult,
     clearError: () => setState((p) => ({ ...p, error: null })),
   };
 }

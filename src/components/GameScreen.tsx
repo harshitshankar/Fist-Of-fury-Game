@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { FightEngine, InputState, EMPTY_INPUT } from "../game/engine";
 import { getFighter } from "../game/characters";
 import { getMap } from "../game/maps";
+import { getWeapon } from "../game/weapons";
 import {
   unlockAudio,
   Sfx,
@@ -23,10 +24,14 @@ interface Props {
   p2Name: string;
   online: boolean;
   rounds?: number;
+  selfId?: string | null;
+  oppId?: string | null;
   onSendState?: (s: any) => void;
   onSendHit?: (d: any) => void;
+  onReportKO?: (loserId: string, round: number) => void;
   registerRemoteState?: (fn: (s: any) => void) => void;
   registerRemoteHit?: (fn: (d: any) => void) => void;
+  registerRoundResult?: (fn: (d: any) => void) => void;
   onExit: () => void;
 }
 
@@ -35,7 +40,9 @@ export default function GameScreen(props: Props) {
   const engineRef = useRef<FightEngine | null>(null);
   const inputRef = useRef<InputState>({ ...EMPTY_INPUT });
   const [hud, setHud] = useState({ p1: 100, p2: 100, p1m: 0, p2m: 0, time: 99 });
-  const [meterPct, setMeterPct] = useState(0);
+
+  const [specialReady, setSpecialReady] = useState(false);
+  const [weaponState, setWeaponState] = useState({ equipped: true, thrown: false });
   const [victory, setVictory] = useState<null | { winner: "p1" | "p2"; name: string }>(null);
   const [ready, setReady] = useState(false);
   const [intro, setIntro] = useState(true);
@@ -76,7 +83,10 @@ export default function GameScreen(props: Props) {
             props.onSendHit?.({
               dmg,
               fromX: engine.p1.x,
-              isSpecial: engine.p1.anim === "special",
+              isSpecial:
+                engine.p1.anim === "special" ||
+                engine.p1.anim === "throw" ||
+                engine.p1.anim === "weaponAtk",
             });
           }
         },
@@ -100,6 +110,15 @@ export default function GameScreen(props: Props) {
           const w = winner === "p1" ? props.p1Name : props.p2Name;
           setTimeout(() => setVictory({ winner, name: w }), 1800);
         },
+        onReportKO: (who) => {
+          // ONLINE: tell the server the ACTUAL loser's socket id; the server
+          // decides the result and broadcasts it to both clients identically.
+          if (!props.online) return;
+          const myId = props.selfId || "";
+          const oppId = props.oppId || "";
+          const loserId = who === "self" ? myId : oppId;
+          props.onReportKO?.(loserId, engine.currentRound);
+        },
       },
     });
     engineRef.current = engine;
@@ -107,6 +126,16 @@ export default function GameScreen(props: Props) {
     if (props.online) {
       props.registerRemoteState?.((s) => engine.setRemoteState(s));
       props.registerRemoteHit?.((d) => engine.receiveDamage(d.dmg, d.fromX, d.isSpecial));
+      // Server-authoritative round result keeps both clients perfectly in sync.
+      props.registerRoundResult?.((d) => {
+        const myId = props.selfId || "";
+        const localWon = d.winnerId === myId;
+        const myRounds = d.score?.[myId] ?? (localWon ? engine.p1Rounds + 1 : engine.p1Rounds);
+        // opponent's rounds = total awarded minus mine
+        const oppId = Object.keys(d.score || {}).find((k) => k !== myId) || "";
+        const oppRounds = d.score?.[oppId] ?? engine.p2Rounds;
+        engine.applyRoundResult(localWon, myRounds, oppRounds, !!d.matchOver);
+      });
     }
 
     engine.start();
@@ -150,7 +179,11 @@ export default function GameScreen(props: Props) {
         p2m: Math.round(e.p2.meter),
         time: Math.ceil(e.roundTimer),
       });
-      setMeterPct(e.p1.meter);
+
+      // special is usable whenever the meter is charged (can be used repeatedly)
+      setSpecialReady(e.p1.meter >= 50);
+      // weapon button states driven by the engine
+      setWeaponState({ equipped: e.p1.weaponEquipped, thrown: e.p1.weaponThrown });
     }, 100);
 
     // network state push
@@ -318,24 +351,48 @@ export default function GameScreen(props: Props) {
       )}
 
       {/* Touch controls */}
-      {!victory && <TouchControls onChange={handleInput} meterPct={meterPct} />}
+      {!victory && (
+        <TouchControls
+          onChange={handleInput}
+          specialReady={specialReady}
+          weaponEquipped={weaponState.equipped}
+          weaponThrown={weaponState.thrown}
+          weaponEmoji={getWeapon(props.p1Id).emoji}
+        />
+      )}
 
-      {/* VICTORY MATE — slow motion overlay */}
+      {/* End-of-match overlay — celebration ONLY when YOU win */}
       {victory && (
         <div className="absolute inset-0 z-50 flex flex-col items-center justify-center">
-          <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-black/70" />
+          <div className="absolute inset-0 bg-gradient-to-b from-black/50 via-black/30 to-black/80" />
           <div className="relative animate-[victoryIn_0.6s_ease-out] text-center">
-            <div className="text-2xl font-bold tracking-[0.3em] text-yellow-300 sm:text-4xl">
-              {victory.winner === "p1" ? "🏆 YOU WIN 🏆" : "💀 DEFEATED 💀"}
-            </div>
-            <div className="mt-2 bg-gradient-to-r from-yellow-300 via-orange-400 to-red-500 bg-clip-text text-6xl font-black text-transparent drop-shadow-[0_0_40px_rgba(255,150,0,0.9)] sm:text-8xl">
-              VICTORY MATE!
-            </div>
-            <div className="mt-2 text-xl font-bold text-white sm:text-3xl">
-              {victory.name} is the champion
-            </div>
+            {victory.winner === "p1" ? (
+              <>
+                <div className="text-2xl font-bold tracking-[0.3em] text-yellow-300 sm:text-4xl">
+                  🏆 YOU WIN 🏆
+                </div>
+                <div className="mt-2 bg-gradient-to-r from-yellow-300 via-orange-400 to-red-500 bg-clip-text text-6xl font-black text-transparent drop-shadow-[0_0_40px_rgba(255,150,0,0.9)] sm:text-8xl">
+                  VICTORY MATE!
+                </div>
+                <div className="mt-2 text-xl font-bold text-white sm:text-3xl">
+                  {victory.name} is the champion
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="text-3xl font-black tracking-[0.2em] text-red-400 sm:text-5xl">
+                  💀 DEFEATED 💀
+                </div>
+                <div className="mt-3 text-xl font-bold text-white/80 sm:text-3xl">
+                  {victory.name} won the match
+                </div>
+                <div className="mt-1 text-base font-semibold text-white/50 sm:text-xl">
+                  Better luck next time!
+                </div>
+              </>
+            )}
             {totalRounds > 1 && (
-              <div className="mt-2 text-lg font-black text-orange-300">
+              <div className="mt-3 text-lg font-black text-orange-300">
                 Final Score — {props.p1Name}: {roundWins.p1} &nbsp;•&nbsp; {props.p2Name}: {roundWins.p2}
               </div>
             )}
@@ -348,8 +405,8 @@ export default function GameScreen(props: Props) {
               </button>
             </div>
           </div>
-          {/* confetti */}
-          <Confetti />
+          {/* confetti only celebrates a WIN */}
+          {victory.winner === "p1" && <Confetti />}
         </div>
       )}
     </div>
