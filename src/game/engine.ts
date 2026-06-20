@@ -181,7 +181,8 @@ export class FightEngine {
   thrownWeapons: ThrownWeapon[] = [];
   beamClash: BeamClash | null = null; // active beam clash (button-smash mini-game)
   clashRequested = false; // online: asked the server to start a clash (waiting)
-  clashSendTimer = 0;     // online: throttle for sending mash power to server
+  clashSendTimer = 0;     // online: wall-clock ms until next mash power send
+  lastClashSendMs = 0;    // online: last wall-clock time we sent mash power
   prevInput: InputState = { ...EMPTY_INPUT }; // last frame's input (edge detection)
   texts: FloatingText[] = [];
   input: InputState = { ...EMPTY_INPUT };
@@ -307,16 +308,20 @@ export class FightEngine {
   }
 
   // Returns a compact snapshot of local p1 to send to peer.
+  // Includes velocity and hurt state so the opponent sees accurate animations.
   getLocalSnapshot() {
     return {
       x: this.p1.x,
       y: this.p1.y,
+      vx: this.p1.vx,
+      vy: this.p1.vy,
       facing: this.p1.facing,
       hp: this.p1.hp,
       meter: this.p1.meter,
       anim: this.p1.anim,
       animTime: this.p1.animTime,
       blocking: this.p1.blocking,
+      hurtTime: this.p1.hurtTime,
       weaponEquipped: this.p1.weaponEquipped,
       weaponThrown: this.p1.weaponThrown,
     };
@@ -382,13 +387,20 @@ export class FightEngine {
       // P2 driven by remote snapshot (interpolated)
       if (this.remoteSnapshot) {
         const s = this.remoteSnapshot;
-        if (typeof s.x === "number") this.p2.x += (s.x - this.p2.x) * 0.35 * dt;
-        if (typeof s.y === "number") this.p2.y += (s.y - this.p2.y) * 0.35 * dt;
+        // Aggressive interpolation (0.55) so opponent position tracks tightly.
+        // Uses exponential-ish lerp: higher factor = snappier = less perceived lag.
+        const lerpF = 0.55;
+        if (typeof s.x === "number") this.p2.x += (s.x - this.p2.x) * lerpF * dt;
+        if (typeof s.y === "number") this.p2.y += (s.y - this.p2.y) * lerpF * dt;
+        // Sync velocity so physics (gravity, knockback) interpolates correctly
+        if (typeof (s as any).vx === "number") this.p2.vx += ((s as any).vx - this.p2.vx) * lerpF * dt;
+        if (typeof (s as any).vy === "number") this.p2.vy += ((s as any).vy - this.p2.vy) * lerpF * dt;
         if (typeof s.facing === "number") this.p2.facing = s.facing as FacingDir;
         // Ignore remote HP during the round-reset grace window so a stale
         // post-KO hp:0 snapshot can't instantly re-end the next round.
         if (typeof s.hp === "number" && this.roundGrace <= 0) this.p2.hp = s.hp;
         if (typeof s.meter === "number") this.p2.meter = s.meter;
+        if (typeof (s as any).hurtTime === "number") this.p2.hurtTime = (s as any).hurtTime;
         if (s.anim) {
           // detect the opponent starting a special -> spawn a visual beam (no local damage)
           if (s.anim === "special" && this.p2.anim !== "special") {
@@ -972,6 +984,39 @@ export class FightEngine {
         }
       }
     }
+
+    // ONLINE: while waiting for server clash:start, FREEZE both beams at the
+    // collision point and show sparks. This prevents them flying through each
+    // other and gives immediate visual feedback while we wait for the server.
+    if (this.clashRequested && !this.beamClash) {
+      const p1b = this.beams.find((b) => b.owner === "p1");
+      const p2b = this.beams.find((b) => b.owner === "p2");
+      if (p1b && p2b) {
+        // freeze beams at collision midpoint
+        const cx = (p1b.x + p2b.x) / 2;
+        p1b.x = cx;
+        p2b.x = cx;
+        p1b.life = Math.max(p1b.life, 10);
+        p2b.life = Math.max(p2b.life, 10);
+        // spark shower at the meeting point to show something is happening
+        if (Math.random() < 0.7) {
+          const cy = (p1b.y + p2b.y) / 2;
+          const a = Math.random() * Math.PI * 2;
+          const sp = 2 + Math.random() * 6;
+          this.particles.push({
+            x: cx, y: cy,
+            vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+            life: 8 + Math.random() * 10, maxLife: 18,
+            color: Math.random() < 0.5 ? p1b.color : p2b.color,
+            size: 3 + Math.random() * 5,
+          });
+        }
+        this.shakeMag = Math.max(this.shakeMag, 4);
+      }
+      // Don't process normal beam movement while beams are frozen
+      return;
+    }
+
     if (this.beamClash) {
       this.updateBeamClash(step);
       return; // clash takes over beam movement
@@ -1120,11 +1165,11 @@ export class FightEngine {
       // CPU strength scales a bit so it's a real contest
       c.p2Power += (0.5 + Math.random() * 0.9) * step;
     } else {
-      // ONLINE: stream my mash power to the server more frequently so it can
-      // judge the winner fairly from BOTH players' taps.
-      this.clashSendTimer = (this.clashSendTimer || 0) - step;
-      if (this.clashSendTimer <= 0) {
-        this.clashSendTimer = 5; // every ~5 frames (~83ms at 60fps) — was 12
+      // ONLINE: stream my mash power to the server using WALL-CLOCK time
+      // so the send rate is consistent regardless of frame rate (mobile vs desktop).
+      const now = performance.now();
+      if (now - this.lastClashSendMs >= 80) { // every 80ms (12.5 Hz)
+        this.lastClashSendMs = now;
         this.cb.onClashMash?.(c.p1Power);
       }
     }

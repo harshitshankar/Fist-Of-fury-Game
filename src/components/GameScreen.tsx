@@ -125,14 +125,7 @@ export default function GameScreen(props: Props) {
           const loserId = who === "self" ? myId : oppId;
           props.onReportKO?.(loserId, engine.currentRound);
         },
-        onClashDetect: () => {
-          // OPTIMISTIC: start the clash visually on THIS client immediately
-          // (no waiting for the server echo — eliminates 1 full RTT of lag on mobile).
-          // startBeamClashOnline() has a guard so the server's clash:start echo
-          // is safely ignored when it arrives.
-          engine.startBeamClashOnline();
-          props.onClashDetect?.();
-        },
+        onClashDetect: () => props.onClashDetect?.(),
         onClashMash: (power) => props.onClashMash?.(power),
       },
     });
@@ -209,7 +202,7 @@ export default function GameScreen(props: Props) {
       // weapon button states driven by the engine
       setWeaponState({ equipped: e.p1.weaponEquipped, thrown: e.p1.weaponThrown });
       setClashing(!!e.beamClash && !e.beamClash.resolved);
-    }, 80);
+    }, 50);
 
     // network state push
     let netInt: any;
@@ -217,7 +210,7 @@ export default function GameScreen(props: Props) {
       netInt = setInterval(() => {
         const e = engineRef.current;
         if (e) props.onSendState?.(e.getLocalSnapshot());
-      }, 50);
+      }, 30); // 33Hz — snappy enough for a fighting game, light on bandwidth
     }
 
     // keyboard for desktop

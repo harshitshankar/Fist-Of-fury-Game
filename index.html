@@ -9,8 +9,25 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="description" content="Fist of Fury — online multiplayer fighting game with voice chat, unique fighters and arenas." />
     <title>🥊 Fist of Fury — Online Fighting Arena</title>
-    <!-- Google AdSense Verification Script -->
-    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6063172558757532" crossorigin="anonymous"></script>
+    <!-- 
+      AdSense is loaded ONLY on the real website, NOT inside the Android WebView app.
+      The Capacitor native app uses AdMob (see App.tsx) — mixing AdSense inside
+      a WebView violates Google AdSense policy and can get the account banned.
+    -->
+    <script>
+      // Only inject the AdSense script when running on a real browser (website),
+      // never inside the Capacitor/Cordova WebView (Android app).
+      (function() {
+        var isNativeApp = window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform();
+        if (!isNativeApp) {
+          var s = document.createElement('script');
+          s.async = true;
+          s.src = 'https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6063172558757532';
+          s.crossOrigin = 'anonymous';
+          document.head.appendChild(s);
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
