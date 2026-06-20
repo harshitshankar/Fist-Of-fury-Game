@@ -36,6 +36,7 @@ interface Props {
   onClashMash?: (power: number) => void;
   registerClashStart?: (fn: () => void) => void;
   registerClashResult?: (fn: (d: any) => void) => void;
+  registerClashOppMash?: (fn: (power: number) => void) => void;
   onExit: () => void;
 }
 
@@ -124,7 +125,14 @@ export default function GameScreen(props: Props) {
           const loserId = who === "self" ? myId : oppId;
           props.onReportKO?.(loserId, engine.currentRound);
         },
-        onClashDetect: () => props.onClashDetect?.(),
+        onClashDetect: () => {
+          // OPTIMISTIC: start the clash visually on THIS client immediately
+          // (no waiting for the server echo — eliminates 1 full RTT of lag on mobile).
+          // startBeamClashOnline() has a guard so the server's clash:start echo
+          // is safely ignored when it arrives.
+          engine.startBeamClashOnline();
+          props.onClashDetect?.();
+        },
         onClashMash: (power) => props.onClashMash?.(power),
       },
     });
@@ -149,6 +157,9 @@ export default function GameScreen(props: Props) {
         const myId = props.selfId || "";
         engine.applyClashResult(d.winnerId === myId);
       });
+      // Sync the opponent's live mash power — keeps orb position identical on
+      // both screens so the clash feels accurate regardless of network delay.
+      props.registerClashOppMash?.((oppPower) => engine.setRemoteClashPower(oppPower));
     }
 
     engine.start();

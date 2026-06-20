@@ -1120,11 +1120,11 @@ export class FightEngine {
       // CPU strength scales a bit so it's a real contest
       c.p2Power += (0.5 + Math.random() * 0.9) * step;
     } else {
-      // ONLINE: stream my mash power to the server a few times/sec so it can
+      // ONLINE: stream my mash power to the server more frequently so it can
       // judge the winner fairly from BOTH players' taps.
       this.clashSendTimer = (this.clashSendTimer || 0) - step;
       if (this.clashSendTimer <= 0) {
-        this.clashSendTimer = 12;
+        this.clashSendTimer = 5; // every ~5 frames (~83ms at 60fps) — was 12
         this.cb.onClashMash?.(c.p1Power);
       }
     }
@@ -1204,6 +1204,13 @@ export class FightEngine {
       return;
     }
     this.finishClash(localWon ? "p1" : "p2");
+  }
+
+  // ONLINE: server relays the OPPONENT's live mash count so we move the orb
+  // on both screens identically. Called by GameScreen via setOnClashOppMash.
+  setRemoteClashPower(oppPower: number) {
+    if (!this.beamClash || this.beamClash.resolved) return;
+    this.beamClash.p2Power = oppPower;
   }
 
   applyDamage(

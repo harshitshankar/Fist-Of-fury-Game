@@ -57,6 +57,7 @@ export function useMultiplayer() {
   const onRoundResultRef = useRef<((d: any) => void) | null>(null);
   const onClashStartRef = useRef<(() => void) | null>(null);
   const onClashResultRef = useRef<((d: any) => void) | null>(null);
+  const onClashOppMashRef = useRef<((power: number) => void) | null>(null);
 
   const [state, setState] = useState<MpState>({
     connected: false,
@@ -151,6 +152,10 @@ export function useMultiplayer() {
     });
     s.on("clash:result", (d: any) => {
       onClashResultRef.current?.(d);
+    });
+    // opponent's live mash power — used to sync the clash orb position
+    s.on("clash:oppmash", (power: number) => {
+      onClashOppMashRef.current?.(power);
     });
 
     s.on("chat:msg", (m: ChatMsg) => {
@@ -313,6 +318,9 @@ export function useMultiplayer() {
   const setOnClashResult = useCallback((fn: (d: any) => void) => {
     onClashResultRef.current = fn;
   }, []);
+  const setOnClashOppMash = useCallback((fn: (power: number) => void) => {
+    onClashOppMashRef.current = fn;
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -341,6 +349,7 @@ export function useMultiplayer() {
     clashMash,
     setOnClashStart,
     setOnClashResult,
+    setOnClashOppMash,
     clearError: () => setState((p) => ({ ...p, error: null })),
   };
 }

@@ -318,7 +318,7 @@ io.on("connection", (socket) => {
 
     io.to(currentRoom).emit("clash:start");
 
-    // judge the clash after ~3 seconds of mashing
+    // judge the clash after ~2.5 seconds of mashing
     if (room.clashTimer) clearTimeout(room.clashTimer);
     room.clashTimer = setTimeout(() => {
       const ids = [...room.players.keys()];
@@ -331,16 +331,19 @@ io.on("connection", (socket) => {
       io.to(currentRoom).emit("clash:result", { winnerId });
       room.clashActive = false;
       room.clashMash = {};
-    }, 3000);
+    }, 2500);
   });
 
   socket.on("clash:mash", (power) => {
     if (!currentRoom) return;
     const room = rooms.get(currentRoom);
     if (!room || !room.clashActive || !room.clashMash) return;
-    // store the highest reported power for this player
+    // accumulate mash power (each tap increments; this is fairer than storing max)
     const v = Number(power) || 0;
-    if (v > (room.clashMash[socket.id] || 0)) room.clashMash[socket.id] = v;
+    room.clashMash[socket.id] = v; // client already accumulates; just take latest
+    // relay this player's mash count to their OPPONENT so both clients
+    // can move the orb in sync — eliminates the position desync between mobile & web
+    socket.to(currentRoom).emit("clash:oppmash", v);
   });
 
   // ---- Chat ----

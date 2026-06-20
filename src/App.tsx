@@ -260,6 +260,7 @@ export default function App() {
           onClashMash={mp.clashMash}
           registerClashStart={mp.setOnClashStart}
           registerClashResult={mp.setOnClashResult}
+          registerClashOppMash={mp.setOnClashOppMash}
           onExit={exitToLobby}
         />
         <ChatPanel
