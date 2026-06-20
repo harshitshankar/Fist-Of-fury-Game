@@ -66,7 +66,7 @@ export default function Lobby({ onCreate, onJoin, onSolo, error, connecting }: P
     <div className="min-h-[100dvh] w-full bg-gradient-to-b from-[#0a0a2e] via-[#1a1040] to-[#2a0a3e] px-4 py-6 text-white">
       <div className="mx-auto max-w-md space-y-5 pb-16">
         {/* Google AdSense Banner (Web version only) */}
-        <AdSenseBanner client="ca-pub-XXXXXXXXXXXXXXXX" slot="1234567890" />
+        <AdSenseBanner client="ca-pub-6063172558757532" slot="YOUR_ADSENSE_SLOT_ID_HERE" />
         
         {/* Title */}
         <div className="text-center">
