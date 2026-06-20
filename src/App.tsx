@@ -23,39 +23,49 @@ export default function App() {
 
   const { state } = mp;
 
-  // 1. Safe Initialization of AdMob and Privacy Framework at Startup
+  // 1. Safe Initialization of AdMob/AdSense and Privacy Framework at Startup
   useEffect(() => {
-    const initAdMobWithConsent = async () => {
-      try {
-        console.log("ADS: Checking User Privacy Consent via UMP SDK...");
-        
+    const isNativeApp = typeof window !== "undefined" && !!(window as any).Capacitor;
+    if (isNativeApp) {
+      const initAdMobWithConsent = async () => {
         try {
-          const consentInfo = await AdMob.requestConsentInfo();
-          if (consentInfo.isConsentFormAvailable && consentInfo.status === 'REQUIRED') {
-            console.log("ADS: Consent required. Presenting form...");
-            await AdMob.showConsentForm();
-          } else {
-            console.log("ADS: Consent check skipped (Not required or already gathered).");
+          console.log("ADS: Checking User Privacy Consent via UMP SDK...");
+          
+          try {
+            const consentInfo = await AdMob.requestConsentInfo();
+            if (consentInfo.isConsentFormAvailable && consentInfo.status === 'REQUIRED') {
+              console.log("ADS: Consent required. Presenting form...");
+              await AdMob.showConsentForm();
+            } else {
+              console.log("ADS: Consent check skipped (Not required or already gathered).");
+            }
+          } catch (consentError) {
+            console.warn("ADS WARNING: Privacy form execution failed or bypassed:", consentError);
           }
-        } catch (consentError) {
-          console.warn("ADS WARNING: Privacy form execution failed or bypassed:", consentError);
+
+          console.log("ADS: Initializing AdMob engine...");
+          await AdMob.initialize();
+          console.log("ADS: AdMob Engine initialized successfully.");
+          
+          await preloadInterstitialAd();
+
+          // Safe to unlock banner requests now
+          setIsAdMobReady(true);
+        } catch (error) {
+          console.error("ADS CRITICAL INIT ERROR:", error);
+          setIsAdMobReady(true);
         }
-
-        console.log("ADS: Initializing AdMob engine...");
-        await AdMob.initialize();
-        console.log("ADS: AdMob Engine initialized successfully.");
-        
-        await preloadInterstitialAd();
-
-        // Safe to unlock banner requests now
-        setIsAdMobReady(true);
-      } catch (error) {
-        console.error("ADS CRITICAL INIT ERROR:", error);
-        setIsAdMobReady(true);
-      }
-    };
-    
-    initAdMobWithConsent();
+      };
+      
+      initAdMobWithConsent();
+    } else {
+      console.log("ADSENSE: Running on Web. Injecting Google AdSense script...");
+      const script = document.createElement("script");
+      script.async = true;
+      script.src = "https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-XXXXXXXXXXXXXXXX";
+      script.crossOrigin = "anonymous";
+      document.head.appendChild(script);
+    }
   }, []);
 
   // 2. Control Banner Ads safely using State Tracking Synchronization

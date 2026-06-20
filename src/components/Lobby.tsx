@@ -8,6 +8,7 @@ import {
   setMusicEnabled,
   isMusicEnabled,
 } from "../game/audio";
+import AdSenseBanner from "./AdSenseBanner";
 
 export interface LobbyConfig {
   name: string;
@@ -64,6 +65,9 @@ export default function Lobby({ onCreate, onJoin, onSolo, error, connecting }: P
   return (
     <div className="min-h-[100dvh] w-full bg-gradient-to-b from-[#0a0a2e] via-[#1a1040] to-[#2a0a3e] px-4 py-6 text-white">
       <div className="mx-auto max-w-md space-y-5 pb-16">
+        {/* Google AdSense Banner (Web version only) */}
+        <AdSenseBanner client="ca-pub-XXXXXXXXXXXXXXXX" slot="1234567890" />
+        
         {/* Title */}
         <div className="text-center">
           <h1 className="bg-gradient-to-r from-yellow-300 via-orange-500 to-red-600 bg-clip-text text-4xl font-black text-transparent drop-shadow-[0_0_20px_rgba(255,90,0,0.6)] sm:text-5xl">
