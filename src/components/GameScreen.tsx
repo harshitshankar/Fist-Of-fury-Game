@@ -222,6 +222,9 @@ export default function GameScreen(props: Props) {
       k: "kick",
       l: "block",
       u: "special",
+      p: "holster",
+      i: "weapon",
+      o: "throwWeapon",
     };
     const kd = (e: KeyboardEvent) => {
       const k = keymap[e.key.toLowerCase()];

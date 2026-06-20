@@ -42,6 +42,7 @@ export default function Lobby({ onCreate, onJoin, onSolo, error, connecting }: P
   const [rounds, setRounds] = useState(3);
   const [musicOn, setMusicOn] = useState(isMusicEnabled());
   const startedRef = useRef(false);
+  const isNativeApp = typeof window !== "undefined" && !!(window as any).Capacitor;
 
   // Start menu music on the first user interaction (browsers block autoplay).
   useEffect(() => {
@@ -258,6 +259,50 @@ export default function Lobby({ onCreate, onJoin, onSolo, error, connecting }: P
             🤖 PLAY vs CPU
           </button>
         </div>
+        
+        {!isNativeApp && (
+          <div className="rounded-2xl border border-white/10 bg-black/40 p-4">
+            <h3 className="mb-2 text-center text-sm font-black text-orange-400">⌨️ DESKTOP KEYBOARD CONTROLS</h3>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs text-white/80">
+              <div className="flex justify-between border-b border-white/5 pb-1">
+                <span className="font-bold text-white/50">Move:</span>
+                <span className="font-black text-blue-400">A / D or ◀ / ▶</span>
+              </div>
+              <div className="flex justify-between border-b border-white/5 pb-1">
+                <span className="font-bold text-white/50">Jump:</span>
+                <span className="font-black text-green-400">W or Space</span>
+              </div>
+              <div className="flex justify-between border-b border-white/5 pb-1">
+                <span className="font-bold text-white/50">Punch:</span>
+                <span className="font-black text-red-400">J</span>
+              </div>
+              <div className="flex justify-between border-b border-white/5 pb-1">
+                <span className="font-bold text-white/50">Kick:</span>
+                <span className="font-black text-pink-400">K</span>
+              </div>
+              <div className="flex justify-between border-b border-white/5 pb-1">
+                <span className="font-bold text-white/50">Block:</span>
+                <span className="font-black text-slate-400">L</span>
+              </div>
+              <div className="flex justify-between border-b border-white/5 pb-1">
+                <span className="font-bold text-white/50">Special:</span>
+                <span className="font-black text-amber-400">U</span>
+              </div>
+              <div className="flex justify-between border-b border-white/5 pb-1">
+                <span className="font-bold text-white/50">Draw/Holster:</span>
+                <span className="font-black text-violet-400">P</span>
+              </div>
+              <div className="flex justify-between border-b border-white/5 pb-1">
+                <span className="font-bold text-white/50">Use Weapon:</span>
+                <span className="font-black text-emerald-400">I</span>
+              </div>
+              <div className="flex justify-between border-b border-white/5 pb-1">
+                <span className="font-bold text-white/50">Throw:</span>
+                <span className="font-black text-rose-400">O</span>
+              </div>
+            </div>
+          </div>
+        )}
 
         <p className="pt-2 text-center text-xs text-white/40">
           Share your ROOM CODE with a friend to fight online. One creates, one joins —
