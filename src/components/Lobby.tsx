@@ -42,7 +42,7 @@ export default function Lobby({ onCreate, onJoin, onSolo, error, connecting }: P
   const [rounds, setRounds] = useState(3);
   const [musicOn, setMusicOn] = useState(isMusicEnabled());
   const startedRef = useRef(false);
-  const isNativeApp = typeof window !== "undefined" && !!(window as any).Capacitor;
+  const isNativeApp = typeof window !== "undefined" && !!((window as any).Capacitor?.isNativePlatform?.());
 
   // Start menu music on the first user interaction (browsers block autoplay).
   useEffect(() => {

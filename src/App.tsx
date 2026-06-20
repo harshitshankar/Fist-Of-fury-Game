@@ -25,7 +25,7 @@ export default function App() {
 
   // 1. Safe Initialization of AdMob/AdSense and Privacy Framework at Startup
   useEffect(() => {
-    const isNativeApp = typeof window !== "undefined" && !!(window as any).Capacitor;
+    const isNativeApp = typeof window !== "undefined" && !!((window as any).Capacitor?.isNativePlatform?.());
     if (isNativeApp) {
       const initAdMobWithConsent = async () => {
         try {

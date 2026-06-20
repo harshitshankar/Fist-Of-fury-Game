@@ -42,7 +42,7 @@ const SERVER_URL = import.meta.env.DEV
   : (typeof window !== "undefined" && 
      window.location.origin && 
      window.location.origin.startsWith("http") && 
-     !(window as any).Capacitor && 
+     !((window as any).Capacitor?.isNativePlatform?.()) && 
      window.location.origin !== "http://localhost"
       ? window.location.origin
       : "https://fist-of-fury-game.onrender.com");

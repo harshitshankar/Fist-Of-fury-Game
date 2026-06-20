@@ -7,7 +7,7 @@ interface AdSenseBannerProps {
 
 export default function AdSenseBanner({ client, slot }: AdSenseBannerProps) {
   // Safe check to verify if the app is running in the native Capacitor shell
-  const isNativeApp = typeof window !== "undefined" && !!(window as any).Capacitor;
+  const isNativeApp = typeof window !== "undefined" && !!((window as any).Capacitor?.isNativePlatform?.());
 
   useEffect(() => {
     if (isNativeApp) return;
