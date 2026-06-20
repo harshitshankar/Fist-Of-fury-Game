@@ -39,7 +39,11 @@ export interface MpState {
 
 const SERVER_URL = import.meta.env.DEV 
   ? "http://localhost:3001" 
-  : (typeof window !== "undefined" && window.location.origin && window.location.origin.startsWith("http")
+  : (typeof window !== "undefined" && 
+     window.location.origin && 
+     window.location.origin.startsWith("http") && 
+     !(window as any).Capacitor && 
+     window.location.origin !== "http://localhost"
       ? window.location.origin
       : "https://fist-of-fury-game.onrender.com");
 
