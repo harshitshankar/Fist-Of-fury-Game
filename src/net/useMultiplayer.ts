@@ -37,7 +37,11 @@ export interface MpState {
   peerSpeaking: boolean;
 }
 
-const SERVER_URL = import.meta.env.DEV ? "http://localhost:3001" : "";
+const SERVER_URL = import.meta.env.DEV 
+  ? "http://localhost:3001" 
+  : (typeof window !== "undefined" && window.location.origin && window.location.origin.startsWith("http")
+      ? window.location.origin
+      : "https://fist-of-fury-game.onrender.com");
 
 export function useMultiplayer() {
   const socketRef = useRef<Socket | null>(null);
@@ -69,7 +73,7 @@ export function useMultiplayer() {
   const ensureSocket = useCallback(() => {
     if (socketRef.current) return socketRef.current;
     const s = io(SERVER_URL, {
-      transports: ["websocket", "polling"],
+      transports: ["websocket"],
       timeout: 8000,
       reconnectionAttempts: 3,
     });
@@ -79,7 +83,6 @@ export function useMultiplayer() {
       setState((p) => ({ ...p, connected: true, selfId: s.id || null, error: null }))
     );
 
-    // If we can't reach the multiplayer server, tell the user clearly.
     s.on("connect_error", () =>
       setState((p) => ({
         ...p,
@@ -157,7 +160,6 @@ export function useMultiplayer() {
       }));
     });
 
-    // ---- WebRTC voice signaling ----
     s.on("voice:offer", async (offer: RTCSessionDescriptionInit) => {
       await handleVoiceOffer(offer);
     });
