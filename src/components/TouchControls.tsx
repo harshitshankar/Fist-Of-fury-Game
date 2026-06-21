@@ -30,35 +30,46 @@ function HoldButton({
   disabled?: boolean;
 }) {
   const ref = useRef<HTMLButtonElement>(null);
+  // Stable refs so we attach the listeners ONCE — re-running this effect every
+  // render (the old code did, via onDown/onUp deps) removed/re-added listeners
+  // constantly and could drop inputs mid-tap.
+  const downRef = useRef(onDown);
+  const upRef = useRef(onUp);
+  const disRef = useRef(disabled);
+  downRef.current = onDown;
+  upRef.current = onUp;
+  disRef.current = disabled;
+
   useEffect(() => {
     const el = ref.current!;
-    const down = (e: Event) => {
+    // Use Pointer Events: one unified handler for touch + mouse + pen, with
+    // native multi-touch (setPointerCapture keeps a finger "grabbed" even if it
+    // slides off the button — no more accidental releases from mouseleave).
+    const down = (e: PointerEvent) => {
       e.preventDefault();
-      if (!disabled) {
-        onDown();
-        el.classList.add("scale-90", "brightness-150");
-      }
+      if (disRef.current) return;
+      try { el.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+      downRef.current();
+      el.classList.add("scale-90", "brightness-150");
     };
-    const up = (e: Event) => {
+    const up = (e: PointerEvent) => {
       e.preventDefault();
-      onUp();
+      try { el.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
+      upRef.current();
       el.classList.remove("scale-90", "brightness-150");
     };
-    el.addEventListener("touchstart", down, { passive: false });
-    el.addEventListener("touchend", up, { passive: false });
-    el.addEventListener("touchcancel", up, { passive: false });
-    el.addEventListener("mousedown", down);
-    el.addEventListener("mouseup", up);
-    el.addEventListener("mouseleave", up);
+    el.addEventListener("pointerdown", down);
+    el.addEventListener("pointerup", up);
+    el.addEventListener("pointercancel", up);
+    // pointerleave is intentionally NOT bound — releasing only on pointerup
+    // means a held button stays held while the finger drifts, matching the
+    // feel of a real gamepad.
     return () => {
-      el.removeEventListener("touchstart", down);
-      el.removeEventListener("touchend", up);
-      el.removeEventListener("touchcancel", up);
-      el.removeEventListener("mousedown", down);
-      el.removeEventListener("mouseup", up);
-      el.removeEventListener("mouseleave", up);
+      el.removeEventListener("pointerdown", down);
+      el.removeEventListener("pointerup", up);
+      el.removeEventListener("pointercancel", up);
     };
-  }, [onDown, onUp, disabled]);
+  }, []);
 
   return (
     <button

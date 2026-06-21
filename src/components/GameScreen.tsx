@@ -48,7 +48,9 @@ export default function GameScreen(props: Props) {
 
   const [specialReady, setSpecialReady] = useState(false);
   const [weaponState, setWeaponState] = useState({ equipped: true, thrown: false });
-  const [clashing, setClashing] = useState(false);
+  // clash HUD: who's winning the mash (ratio -1..1, negative = p1/me winning),
+  // whether the intro freeze is playing, and the final winner.
+  const [clashHud, setClashHud] = useState<{ ratio: number; intro: boolean; winner: "p1" | "p2" | null } | null>(null);
   const [victory, setVictory] = useState<null | { winner: "p1" | "p2"; name: string }>(null);
   const [ready, setReady] = useState(false);
   const [intro, setIntro] = useState(true);
@@ -66,8 +68,13 @@ export default function GameScreen(props: Props) {
     const canvas = canvasRef.current!;
     const resize = () => {
       const rect = canvas.getBoundingClientRect();
-      canvas.width = rect.width * (window.devicePixelRatio || 1);
-      canvas.height = rect.height * (window.devicePixelRatio || 1);
+      // Cap the device-pixel-ratio at 2. Many phones report DPR 3–4, which
+      // creates a 4K+ canvas that tanks frame rate during beam clashes
+      // (hundreds of additive-blend particles). Capping keeps pixels crisp
+      // while keeping the game smooth on mid-range devices.
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      canvas.width = rect.width * dpr;
+      canvas.height = rect.height * dpr;
     };
     resize();
     window.addEventListener("resize", resize);
@@ -201,16 +208,18 @@ export default function GameScreen(props: Props) {
       setSpecialReady(e.p1.meter >= 50);
       // weapon button states driven by the engine
       setWeaponState({ equipped: e.p1.weaponEquipped, thrown: e.p1.weaponThrown });
-      setClashing(!!e.beamClash && !e.beamClash.resolved);
+      const prog = e.clashProgress();
+      setClashHud(prog);
     }, 50);
 
-    // network state push
+    // network state push — higher rate (50Hz) for tighter sync between mobile
+    // clients. Each snapshot is small (~12 numbers), so bandwidth stays light.
     let netInt: any;
     if (props.online) {
       netInt = setInterval(() => {
         const e = engineRef.current;
         if (e) props.onSendState?.(e.getLocalSnapshot());
-      }, 30); // 33Hz — snappy enough for a fighting game, light on bandwidth
+      }, 20); // 50Hz — keeps the opponent's position/animation tightly in sync
     }
 
     // keyboard for desktop
@@ -371,14 +380,38 @@ export default function GameScreen(props: Props) {
         </div>
       )}
 
-      {/* BEAM CLASH — mash prompt */}
-      {clashing && (
-        <div className="absolute inset-x-0 top-16 z-40 flex flex-col items-center pointer-events-none">
-          <div className="animate-pulse text-3xl font-black text-white drop-shadow-[0_0_20px_rgba(255,255,255,0.9)] sm:text-5xl">
-            ⚡ MASH! ⚡
-          </div>
-          <div className="mt-1 text-sm font-bold text-yellow-300 sm:text-lg">
-            Tap PUNCH / SPECIAL fast to win the clash!
+      {/* BEAM CLASH — intro banner + tug-of-war progress bar */}
+      {clashHud && (
+        <div className="absolute inset-x-0 top-14 z-40 flex flex-col items-center pointer-events-none px-4">
+          {/* Intro freeze banner ("BEAM CLASH!") shown before the mash phase */}
+          {clashHud.intro && (
+            <div className="mb-2 animate-pulse text-4xl font-black text-yellow-300 drop-shadow-[0_0_24px_rgba(255,210,0,1)] sm:text-6xl">
+              ⚡ BEAM CLASH! ⚡
+            </div>
+          )}
+          {/* Mash prompt once the mash phase begins */}
+          {!clashHud.intro && !clashHud.winner && (
+            <div className="mb-1 animate-pulse text-2xl font-black text-white drop-shadow-[0_0_18px_rgba(255,255,255,0.9)] sm:text-4xl">
+              🔥 MASH PUNCH / SPECIAL! 🔥
+            </div>
+          )}
+          {/* Winner verdict once the resolve animation is playing */}
+          {clashHud.winner && (
+            <div
+              className={`mb-1 text-2xl font-black drop-shadow-[0_0_20px_rgba(0,0,0,0.8)] sm:text-4xl ${
+                clashHud.winner === "p1" ? "text-yellow-300" : "text-red-400"
+              }`}
+            >
+              {clashHud.winner === "p1" ? "🏆 YOU OVERPOWERED!" : "💥 OVERRUN!"}
+            </div>
+          )}
+
+          {/* Tug-of-war bar: p1 (you) on the left, p2 (foe) on the right.
+              The knob position = clash ratio; the leading side grows. */}
+          <BeamClashBar ratio={clashHud.ratio} p1Color={props.p1Color} p2Color={props.p2Color} />
+          <div className="mt-1 flex w-full max-w-md justify-between text-xs font-black sm:text-sm">
+            <span style={{ color: props.p1Color }}>YOU</span>
+            <span style={{ color: props.p2Color }}>{props.p2Name.toUpperCase()}</span>
           </div>
         </div>
       )}
@@ -541,6 +574,47 @@ function FighterCard({ fighter, color, name }: { fighter: any; color: string; na
       </div>
       <div className="mt-2 text-lg font-black text-white">{name}</div>
       <div className="text-xs font-bold text-orange-300">{fighter.name}</div>
+    </div>
+  );
+}
+
+// Tug-of-war progress bar shown during a beam clash. ratio is in [-1, +1]
+// where positive = p1 (you) dominating. The knob visually shifts to match.
+function BeamClashBar({ ratio, p1Color, p2Color }: { ratio: number; p1Color: string; p2Color: string }) {
+  // map ratio to 0..100 percentage (50 = center / even)
+  const pct = Math.max(0, Math.min(100, 50 + ratio * 50));
+  const p1Alpha = Math.max(0.3, 1 - ratio);
+  const p2Alpha = Math.max(0.3, 1 + ratio);
+  return (
+    <div className="relative h-6 w-full max-w-md overflow-hidden rounded-full border-2 border-white/40 bg-black/60">
+      {/* p1 (you) fill from the left */}
+      <div
+        className="absolute inset-y-0 left-0 rounded-l-full transition-all duration-100"
+        style={{
+          width: `${pct}%`,
+          background: `linear-gradient(to right, ${p1Color}, ${p1Color}88)`,
+          opacity: p1Alpha,
+        }}
+      />
+      {/* p2 (foe) fill from the right */}
+      <div
+        className="absolute inset-y-0 right-0 rounded-r-full transition-all duration-100"
+        style={{
+          width: `${100 - pct}%`,
+          background: `linear-gradient(to left, ${p2Color}, ${p2Color}88)`,
+          opacity: p2Alpha,
+        }}
+      />
+      {/* center knob that shifts with the ratio */}
+      <div
+        className="absolute top-0 h-full w-3 -translate-x-1/2 rounded-full bg-white shadow-[0_0_10px_rgba(255,255,255,0.9)] transition-all duration-100"
+        style={{ left: `${pct}%` }}
+      />
+      {/* glow pulse at the knob */}
+      <div
+        className="absolute top-0 h-full w-8 -translate-x-1/2 rounded-full bg-white/20 animate-pulse transition-all duration-100"
+        style={{ left: `${pct}%` }}
+      />
     </div>
   );
 }

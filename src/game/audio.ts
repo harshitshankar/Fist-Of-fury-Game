@@ -119,6 +119,45 @@ export const Sfx = {
   go() {
     tone(880, 0.3, "square", 0.35, 1200);
   },
+  // BEAM CLASH — dramatic DBZ-style cues.
+  clashStart() {
+    // deep impact boom + rising tension swell when the beams lock
+    const c = ensure();
+    if (!c) return;
+    tone(90, 0.7, "sawtooth", 0.45, 40);
+    noise(0.5, 0.3, 600);
+    setTimeout(() => tone(220, 0.6, "square", 0.25, 660), 80);
+    setTimeout(() => tone(330, 0.5, "sawtooth", 0.2, 780), 200);
+  },
+  clashTap() {
+    // sharp zap each time a player lands a mash tap
+    tone(1400, 0.04, "square", 0.12, 900);
+  },
+  clashWin() {
+    // triumphant surge as the winner's beam overwhelms the loser's
+    const c = ensure();
+    if (!c) return;
+    tone(330, 0.5, "sawtooth", 0.35, 1320);
+    setTimeout(() => tone(660, 0.4, "square", 0.3, 1760), 80);
+    setTimeout(() => tone(990, 0.5, "triangle", 0.28, 1480), 180);
+    noise(0.6, 0.25, 3000);
+  },
+  // WEAPON CLASH — metallic clang variants.
+  weaponClash() {
+    // big bright metallic ring when two weapons meet
+    tone(1200, 0.12, "triangle", 0.32, 1800);
+    setTimeout(() => tone(900, 0.1, "triangle", 0.22, 1400), 30);
+    noise(0.08, 0.18, 5000);
+  },
+  weaponShatter() {
+    // shattering glass/metal as the loser's weapon breaks apart
+    const c = ensure();
+    if (!c) return;
+    tone(2000, 0.2, "triangle", 0.3, 400);
+    setTimeout(() => tone(1600, 0.15, "triangle", 0.22, 300), 40);
+    setTimeout(() => tone(1100, 0.18, "square", 0.2, 200), 90);
+    noise(0.25, 0.28, 6000);
+  },
 };
 
 // ============================================================

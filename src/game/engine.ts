@@ -147,6 +147,30 @@ interface BeamClash {
   p2Power: number;    // accumulated mash power for p2
   time: number;       // elapsed frames
   resolved: boolean;
+  // ---- DBZ-style clash presentation ----
+  intro: number;      // intro cinematic countdown (frames remaining) — controls slow-mo + "CLASH!" banner
+  baseW1: number;     // p1's original beam thickness (so we can grow/shrink it with mash ratio)
+  baseW2: number;     // p2's original beam thickness
+  ratio: number;      // current tug-of-war balance: -1 (p1 dominating) .. +1 (p2 dominating)
+  p1Width: number;    // live beam width for p1 (grows when winning the mash)
+  p2Width: number;    // live beam width for p2
+  winner: "p1" | "p2" | null;        // decided winner (during the resolve animation)
+  resolveAnim: number; // countdown frames for the surge / disintegrate finisher
+  rings: ClashRing[]; // shockwave rings emitted at the collision point
+  // transient tap feedback (so a successful mash pulses the orb + screen)
+  p1Pulse: number;    // decays each frame; spikes when p1 mashes
+  p2Pulse: number;    // decays each frame; spikes when p2 mashes
+}
+
+// An expanding shockwave ring at the clash collision point.
+interface ClashRing {
+  x: number;
+  y: number;
+  r: number;          // current radius
+  maxR: number;       // final radius
+  life: number;       // remaining frames
+  maxLife: number;
+  color: string;
 }
 
 const WORLD = { w: 1280, h: 600 };
@@ -181,6 +205,7 @@ export class FightEngine {
   thrownWeapons: ThrownWeapon[] = [];
   beamClash: BeamClash | null = null; // active beam clash (button-smash mini-game)
   clashRequested = false; // online: asked the server to start a clash (waiting)
+  clashRings: ClashRing[] = []; // shockwave rings (shared by both clash types)
   clashSendTimer = 0;     // online: wall-clock ms until next mash power send
   lastClashSendMs = 0;    // online: last wall-clock time we sent mash power
   prevInput: InputState = { ...EMPTY_INPUT }; // last frame's input (edge detection)
@@ -346,6 +371,7 @@ export class FightEngine {
       this.updateThrownWeapons(step);
       this.updateParticles(step);
       this.updateTexts(dt);
+      this.updateClashRings(step);
       return;
     }
 
@@ -362,17 +388,23 @@ export class FightEngine {
 
     // During a BEAM CLASH, button presses push the clash orb instead of
     // performing normal actions (rapid PUNCH/SPECIAL/KICK taps = mash power).
-    if (this.beamClash && !this.beamClash.resolved) {
-      const i = this.input;
-      const p = this.prevInput;
-      const pressed =
-        (i.punch && !p.punch) ||
-        (i.special && !p.special) ||
-        (i.kick && !p.kick);
-      if (pressed) this.pushClash("p1", 6);
-      this.prevInput = { ...i };
+    if (this.beamClash) {
+      const c = this.beamClash;
+      // intro cinematic — no mashing yet, beams just strain against each other
+      const inIntro = c.intro > 0;
+      if (!c.resolved && !inIntro) {
+        const i = this.input;
+        const p = this.prevInput;
+        const pressed =
+          (i.punch && !p.punch) ||
+          (i.special && !p.special) ||
+          (i.kick && !p.kick);
+        if (pressed) this.pushClash("p1", 6);
+      }
+      this.prevInput = { ...this.input };
       this.updateParticles(step);
       this.updateTexts(dt);
+      this.updateClashRings(step);
       this.updateBeams(step); // advances/ resolves the clash
       this.p1.animTime += step;
       this.p2.animTime += step;
@@ -388,13 +420,17 @@ export class FightEngine {
       if (this.remoteSnapshot) {
         const s = this.remoteSnapshot;
         // Aggressive interpolation (0.55) so opponent position tracks tightly.
-        // Uses exponential-ish lerp: higher factor = snappier = less perceived lag.
-        const lerpF = 0.55;
-        if (typeof s.x === "number") this.p2.x += (s.x - this.p2.x) * lerpF * dt;
-        if (typeof s.y === "number") this.p2.y += (s.y - this.p2.y) * lerpF * dt;
+        // IMPORTANT: the factor is clamped to [0,1] so a dropped/slow frame
+        // (large dt) can't OVERSHOOT the target — overshoot was the main cause
+        // of the opponent "jittering" / teleporting past their real position,
+        // which read as lag on mobile. Frame-rate independent: snaps fully when
+        // dt is large, eases smoothly when dt is small.
+        const lerpF = Math.min(1, 0.55 * dt);
+        if (typeof s.x === "number") this.p2.x += (s.x - this.p2.x) * lerpF;
+        if (typeof s.y === "number") this.p2.y += (s.y - this.p2.y) * lerpF;
         // Sync velocity so physics (gravity, knockback) interpolates correctly
-        if (typeof (s as any).vx === "number") this.p2.vx += ((s as any).vx - this.p2.vx) * lerpF * dt;
-        if (typeof (s as any).vy === "number") this.p2.vy += ((s as any).vy - this.p2.vy) * lerpF * dt;
+        if (typeof (s as any).vx === "number") this.p2.vx += ((s as any).vx - this.p2.vx) * lerpF;
+        if (typeof (s as any).vy === "number") this.p2.vy += ((s as any).vy - this.p2.vy) * lerpF;
         if (typeof s.facing === "number") this.p2.facing = s.facing as FacingDir;
         // Ignore remote HP during the round-reset grace window so a stale
         // post-KO hp:0 snapshot can't instantly re-end the next round.
@@ -563,6 +599,7 @@ export class FightEngine {
     this.thrownWeapons = [];
     this.beamClash = null;
     this.clashRequested = false;
+    this.clashRings = [];
     this.roundTimer = this.roundTime;
     this.roundOver = false;
     this.roundWinner = null;
@@ -869,19 +906,39 @@ export class FightEngine {
     });
   }
 
-  // Two thrown weapons smash into each other mid-air: shower of metallic
-  // sparks, a bright ricochet flash, and a clang.
+  // Two thrown weapons smash into each other mid-air. The STRONGER weapon
+  // (by throw damage) wins decisively: the loser's weapon SHATTERS into
+  // fragments and the winner's weapon gets a power boost and keeps flying
+  // toward its target. Ties shatter both. The winner is decided purely by
+  // throwDmg (no randomness) so BOTH online clients resolve identically.
   weaponClash(x: number, y: number, wa: ThrownWeapon, wb: ThrownWeapon) {
-    const ca = getWeapon(wa.fighterId).trail;
-    const cb = getWeapon(wb.fighterId).trail;
-    // burst of sparks shooting outward
-    for (let i = 0; i < 50; i++) {
+    const waW = getWeapon(wa.fighterId);
+    const wbW = getWeapon(wb.fighterId);
+    const ca = waW.trail;
+    const cb = wbW.trail;
+
+    // decide the winner deterministically (online sync-safe)
+    let winner: ThrownWeapon | null;
+    let loser: ThrownWeapon | null;
+    if (wa.dmg > wb.dmg + 0.5) { winner = wa; loser = wb; }
+    else if (wb.dmg > wa.dmg + 0.5) { winner = wb; loser = wa; }
+    else { winner = null; loser = null; } // even clash — both shatter
+
+    const winColor = winner ? getWeapon(winner.fighterId).trail : "#ffffff";
+    const loseColor = loser ? getWeapon(loser.fighterId).trail : cb;
+
+    // ---- impact flash + shockwave ring ----
+    this.spawnClashRing(x, y, 140, 18, "#ffffff");
+    if (winner) this.spawnClashRing(x, y, 110, 16, winColor);
+
+    // big omnidirectional spark burst at the meeting point
+    for (let i = 0; i < 56; i++) {
       const ang = Math.random() * Math.PI * 2;
-      const sp = 4 + Math.random() * 14;
+      const sp = 4 + Math.random() * 16;
       this.particles.push({
         x, y,
         vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp,
-        life: 16 + Math.random() * 22, maxLife: 38,
+        life: 16 + Math.random() * 24, maxLife: 40,
         color: [ca, cb, "#ffffff", "#ffd23b"][Math.floor(Math.random() * 4)],
         size: 2 + Math.random() * 6,
       });
@@ -895,11 +952,55 @@ export class FightEngine {
         life: 14, maxLife: 14, color: "#ffffff", size: 5,
       });
     }
-    this.texts.push({ x, y: y - 40, text: "CLANG!", life: 45, color: "#ffd23b", size: 30 });
-    this.shakeMag = Math.max(this.shakeMag, 18);
-    this.hitFlash = Math.max(this.hitFlash, 0.6);
-    Sfx.block();
-    setTimeout(() => Sfx.hit(), 40);
+
+    // ---- loser's weapon SHATTERS into sharp fragments ----
+    const shatter = (w: ThrownWeapon, col: string) => {
+      // chunky shards flying outward
+      for (let i = 0; i < 26; i++) {
+        const ang = Math.random() * Math.PI * 2;
+        const sp = 3 + Math.random() * 12;
+        this.particles.push({
+          x, y,
+          vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp - 2,
+          life: 20 + Math.random() * 24, maxLife: 44,
+          color: Math.random() < 0.5 ? col : "#ffffff",
+          size: 4 + Math.random() * 7,
+        });
+      }
+      w.hit = true;
+      w.life = 0;
+    };
+
+    if (loser) {
+      shatter(loser, loseColor);
+      // the winner SURGES on, faster and boosted toward its target
+      if (winner) {
+        winner.vx *= 1.35;
+        winner.dmg *= 1.25;
+        winner.life = Math.max(winner.life, 60); // ensure it reaches the foe
+        winner.hit = false;
+        // a forward streak from the boost
+        for (let i = 0; i < 12; i++) {
+          this.particles.push({
+            x: winner.x - winner.dir * i * 3, y: winner.y,
+            vx: -winner.dir * (2 + Math.random() * 3), vy: (Math.random() - 0.5) * 3,
+            life: 12 + Math.random() * 10, maxLife: 22,
+            color: winColor, size: 3 + Math.random() * 4,
+          });
+        }
+        this.texts.push({ x, y: y - 40, text: "OVERPOWER!", life: 50, color: winColor, size: 30 });
+      }
+    } else {
+      // even clash — both shatter
+      shatter(wa, ca);
+      shatter(wb, cb);
+      this.texts.push({ x, y: y - 40, text: "CLANG!", life: 45, color: "#ffd23b", size: 30 });
+    }
+
+    this.shakeMag = Math.max(this.shakeMag, 20);
+    this.hitFlash = Math.max(this.hitFlash, 0.7);
+    Sfx.weaponClash();
+    if (loser) setTimeout(() => Sfx.weaponShatter(), 60);
   }
 
   updateThrownWeapons(step: number) {
@@ -907,15 +1008,16 @@ export class FightEngine {
     const ownerFor = (o: "p1" | "p2") => (o === "p1" ? this.p1 : this.p2);
 
     // ---- WEAPON CLASH: two opposing thrown weapons collide mid-air ----
+    // weaponClash() decides the winner; the loser is shattered in place and
+    // the winner is left alive to keep flying (so do NOT blanket-kill both).
     for (let a = 0; a < this.thrownWeapons.length; a++) {
       for (let b = a + 1; b < this.thrownWeapons.length; b++) {
         const wa = this.thrownWeapons[a];
         const wb = this.thrownWeapons[b];
         if (wa.owner === wb.owner || wa.hit || wb.hit) continue;
+        if (wa.life <= 0 || wb.life <= 0) continue;
         if (Math.abs(wa.x - wb.x) < 44 && Math.abs(wa.y - wb.y) < 44) {
           this.weaponClash((wa.x + wb.x) / 2, (wa.y + wb.y) / 2, wa, wb);
-          wa.hit = true; wb.hit = true;
-          wa.life = 0; wb.life = 0;
         }
       }
     }
@@ -1094,9 +1196,17 @@ export class FightEngine {
   }
 
   // ---- BEAM CLASH (button-smash) ----
+  // Two beams lock and a contested orb forms between the fighters. Players mash
+  // to win; the beam of whoever is ahead GROWS (engulfs the foe's) and pushes
+  // the orb toward the loser. On resolve, the winner's beam SURGES forward and
+  // the loser's beam DISINTEGRATES into sparks (Dragon Ball style).
   startBeamClash(p1b: Beam, p2b: Beam) {
     const cx = (p1b.x + p2b.x) / 2;
     const cy = (p1b.y + p2b.y) / 2;
+    const baseW = 52;
+    // lock the beams onto a stable horizontal axis so the clash reads clearly
+    p1b.y = cy; p2b.y = cy;
+    p1b.dir = this.p1.facing; p2b.dir = this.p2.facing;
     this.beamClash = {
       x: cx,
       y: cy,
@@ -1106,12 +1216,37 @@ export class FightEngine {
       p2Power: 0,
       time: 0,
       resolved: false,
+      intro: 38,            // ~0.6s cinematic freeze before mashing begins
+      baseW1: p1b.width || baseW,
+      baseW2: p2b.width || baseW,
+      ratio: 0,             // tug-of-war: -1..+1
+      p1Width: p1b.width || baseW,
+      p2Width: p2b.width || baseW,
+      winner: null,
+      resolveAnim: 0,
+      rings: [],
+      p1Pulse: 0,
+      p2Pulse: 0,
     };
-    this.shakeMag = 14;
-    this.hitFlash = 0.5;
-    this.texts.push({ x: cx, y: cy - 70, text: "CLASH!", life: 50, color: "#ffffff", size: 40 });
+
+    // ---- DBZ-style dramatic intro ----
+    this.targetTimeScale = 0.25;        // slow-mo freeze for impact
+    this.shakeMag = 20;
+    this.hitFlash = 0.7;
+    // expanding shockwave ring from the collision point
+    this.spawnClashRing(cx, cy, 220, 24, "#ffffff");
+    this.spawnClashRing(cx, cy, 150, 20, p1b.color);
+    this.spawnClashRing(cx, cy, 150, 20, p2b.color);
+    // bright collision burst + flash banner
     this.beamExplosion(cx, cy, p1b.color, p2b.color, "#ffffff");
+    this.texts.push({ x: cx, y: cy - 80, text: "⚡ BEAM CLASH! ⚡", life: 60, color: "#ffd23b", size: 40 });
+
+    // lock both fighters into a straining "special" pose for the clash
+    this.p1.anim = "special"; this.p1.animTime = 0; this.p1.vx = 0;
+    this.p2.anim = "special"; this.p2.animTime = 0; this.p2.vx = 0;
+
     Sfx.special();
+    Sfx.clashStart();
   }
 
   // ONLINE: the server tells BOTH clients to start the clash at the same time.
@@ -1151,18 +1286,75 @@ export class FightEngine {
   // Called when a player taps SPECIAL/PUNCH during a clash to push the orb.
   pushClash(who: "p1" | "p2", amount = 1) {
     if (!this.beamClash || this.beamClash.resolved) return;
-    if (who === "p1") this.beamClash.p1Power += amount;
-    else this.beamClash.p2Power += amount;
+    if (this.beamClash.intro > 0) return; // still in the intro freeze
+    if (who === "p1") {
+      this.beamClash.p1Power += amount;
+      this.beamClash.p1Pulse = 1; // tap feedback flash
+    } else {
+      this.beamClash.p2Power += amount;
+      this.beamClash.p2Pulse = 1;
+    }
+    Sfx.clashTap();
+    // small visual confirmation: a forward spark jet from the masher's beam
+    const owner = who === "p1" ? this.p1 : this.p2;
+    const beam = who === "p1" ? this.beamClash.p1Beam : this.beamClash.p2Beam;
+    for (let i = 0; i < 6; i++) {
+      const sp = 4 + Math.random() * 6;
+      this.particles.push({
+        x: owner.x + owner.facing * 50,
+        y: owner.y + 48,
+        vx: owner.facing * sp,
+        vy: (Math.random() - 0.5) * 6,
+        life: 10 + Math.random() * 10, maxLife: 20,
+        color: beam.color, size: 3 + Math.random() * 4,
+      });
+    }
   }
 
   updateBeamClash(step: number) {
     const c = this.beamClash!;
     c.time += step;
+    // decay the per-frame tap feedback pulses
+    c.p1Pulse = Math.max(0, c.p1Pulse - 0.12 * step);
+    c.p2Pulse = Math.max(0, c.p2Pulse - 0.12 * step);
+
+    // ---- INTRO CINEMATIC: beams strain, orb pulses, no mashing yet ----
+    if (c.intro > 0) {
+      c.intro -= step;
+      // during the intro, slowly restore time to normal as it ends
+      if (c.intro < 12 && this.targetTimeScale < 0.6) this.targetTimeScale = 1;
+      c.p1Beam.x = c.x; c.p2Beam.x = c.x;
+      c.p1Beam.life = Math.max(c.p1Beam.life, 4);
+      c.p2Beam.life = Math.max(c.p2Beam.life, 4);
+      this.shakeMag = Math.max(this.shakeMag, 5);
+      // flickering sparks where the beams meet
+      if (Math.random() < 0.8) {
+        const a = Math.random() * Math.PI * 2;
+        const sp = 2 + Math.random() * 6;
+        this.particles.push({
+          x: c.x, y: c.y,
+          vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+          life: 8 + Math.random() * 8, maxLife: 16,
+          color: Math.random() < 0.5 ? c.p1Beam.color : c.p2Beam.color,
+          size: 3 + Math.random() * 5,
+        });
+      }
+      return; // hold the freeze; mash phase hasn't begun
+    }
+    // ensure normal time once mashing begins
+    if (this.targetTimeScale < 0.9) this.targetTimeScale = 1;
+
+    // ---- RESOLVE ANIMATION: winner beam surges, loser beam disintegrates ----
+    if (c.resolved && c.winner) {
+      c.resolveAnim -= step;
+      this.updateClashResolveAnim(c, step);
+      if (c.resolveAnim <= 0) this.endClash(c);
+      return;
+    }
 
     // CPU auto-mashes during a clash (offline). Online: each client mashes for
-    // its own p1 via pushClash(); the loser is decided by the local sim.
+    // its own p1 via pushClash(); the loser is decided by the server.
     if (!this.isOnline) {
-      // CPU strength scales a bit so it's a real contest
       c.p2Power += (0.5 + Math.random() * 0.9) * step;
     } else {
       // ONLINE: stream my mash power to the server using WALL-CLOCK time
@@ -1173,9 +1365,26 @@ export class FightEngine {
         this.cb.onClashMash?.(c.p1Power);
       }
     }
-    // gentle decay so the orb naturally drifts toward whoever stops mashing
-    const diff = (c.p1Power - c.p2Power) * 0.12;
-    c.x += diff * step;
+
+    // ---- TUG-OF-WAR: ratio drives both the orb position AND beam widths ----
+    const total = c.p1Power + c.p2Power;
+    // smooth ratio in [-1, +1]; +1 = p1 totally dominating, -1 = p2 dominating
+    let target = total > 0.01 ? (c.p1Power - c.p2Power) / total : 0;
+    c.ratio += (target - c.ratio) * 0.18 * step;
+
+    // the leading fighter's beam GROWS and the loser's SHRINKS (DBZ overwhelm).
+    const baseAvg = (c.baseW1 + c.baseW2) / 2;
+    const winScale = 1 + c.ratio * 0.9;       // up to ~1.9x for the dominator
+    const loseScale = 1 - c.ratio * 0.6;      // down to ~0.4x for the loser
+    c.p1Width = baseAvg * Math.max(0.35, winScale);
+    c.p2Width = baseAvg * Math.max(0.35, loseScale);
+    c.p1Beam.width = c.p1Width;
+    c.p2Beam.width = c.p2Width;
+
+    // push the contested orb toward the loser (stronger as the ratio grows)
+    const push = c.ratio * 5.5;
+    c.x += push * step;
+    c.x = Math.max(this.p1.x + 40, Math.min(this.p2.x - 40, c.x));
     c.y = (this.p1.y + this.p2.y) / 2 + 48;
 
     // keep both beams anchored to the clash point
@@ -1184,8 +1393,9 @@ export class FightEngine {
     c.p1Beam.life = Math.max(c.p1Beam.life, 4);
     c.p2Beam.life = Math.max(c.p2Beam.life, 4);
 
-    // sparks flying from the contested orb
-    for (let k = 0; k < 3; k++) {
+    // sparks flying from the contested orb (more intense as it gets lopsided)
+    const intensity = 3 + Math.floor(Math.abs(c.ratio) * 4);
+    for (let k = 0; k < intensity; k++) {
       const a = Math.random() * Math.PI * 2;
       const sp = 3 + Math.random() * 8;
       this.particles.push({
@@ -1196,8 +1406,13 @@ export class FightEngine {
         size: 3 + Math.random() * 6,
       });
     }
-    this.shakeMag = Math.max(this.shakeMag, 6);
+    this.shakeMag = Math.max(this.shakeMag, 4 + Math.abs(c.ratio) * 6);
 
+    // emit a shockwave ring whenever one side lands a strong mash burst
+    if (c.p1Pulse > 0.8) this.spawnClashRing(c.x, c.y, 80, 16, c.p1Beam.color);
+    if (c.p2Pulse > 0.8) this.spawnClashRing(c.x, c.y, 80, 16, c.p2Beam.color);
+
+    // ---- RESOLUTION ----
     // OFFLINE: resolve locally when the orb reaches a fighter or times out.
     // ONLINE: the SERVER decides the winner (via applyClashResult) so both
     // players see the exact same outcome — never resolve locally here.
@@ -1205,26 +1420,75 @@ export class FightEngine {
 
     const p1Lost = c.x <= this.p1.x + FIGHTER_W * 0.7;
     const p2Lost = c.x >= this.p2.x - FIGHTER_W * 0.7;
-    const timeout = c.time > 240;
+    const timeout = c.time > 300;
 
     if ((p1Lost || p2Lost || timeout) && !c.resolved) {
       let winner: "p1" | "p2";
       if (p2Lost) winner = "p1";
       else if (p1Lost) winner = "p2";
       else winner = c.p1Power >= c.p2Power ? "p1" : "p2";
-      this.finishClash(winner);
+      this.beginClashResolve(winner);
     }
   }
 
-  // Shared clash finisher (explosion + damage). Online passes the server's winner.
-  finishClash(winner: "p1" | "p2") {
+  // Kick off the dramatic resolve: winner is decided, run the surge animation.
+  beginClashResolve(winner: "p1" | "p2") {
     const c = this.beamClash;
     if (!c || c.resolved) return;
     c.resolved = true;
+    c.winner = winner;
+    c.resolveAnim = 26; // ~0.4s of surge before damage + cleanup
+    this.shakeMag = 26;
+    this.hitFlash = 0.9;
+    Sfx.clashWin();
+  }
+
+  // Per-frame surge/disintegrate visuals while the resolve plays out.
+  updateClashResolveAnim(c: BeamClash, step: number) {
+    const winner = c.winner!;
+    const winBeam = winner === "p1" ? c.p1Beam : c.p2Beam;
+    const loseBeam = winner === "p1" ? c.p2Beam : c.p1Beam;
     const loser = winner === "p1" ? this.p2 : this.p1;
     const champ = winner === "p1" ? this.p1 : this.p2;
-    this.beamExplosion(loser.x, loser.y + 48, c.p1Beam.color, c.p2Beam.color, "#ffffff");
-    this.beamExplosion(loser.x, loser.y + 48, "#ffffff", c.p1Beam.color, c.p2Beam.color);
+
+    // the winner's beam swells and pushes the orb into the loser
+    const t = 1 - c.resolveAnim / 26;
+    winBeam.width = (winner === "p1" ? c.baseW1 : c.baseW2) * (1.4 + t * 1.4);
+    c.x += loser.facing * -4 * step; // drive toward loser (loser.facing points at champ)
+    c.x = Math.max(this.p1.x - 30, Math.min(this.p2.x + 30, c.x));
+    winBeam.x = c.x;
+    loseBeam.x = c.x;
+    winBeam.life = Math.max(winBeam.life, 4);
+
+    // the loser's beam THINS OUT and DISINTEGRATES into a shower of sparks
+    loseBeam.width = (winner === "p1" ? c.baseW2 : c.baseW1) * Math.max(0.05, 1 - t * 1.3);
+    for (let i = 0; i < 10; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = 3 + Math.random() * 10;
+      this.particles.push({
+        x: c.x, y: c.y,
+        vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+        life: 14 + Math.random() * 16, maxLife: 30,
+        color: Math.random() < 0.5 ? loseBeam.color : "#ffffff",
+        size: 4 + Math.random() * 6,
+      });
+    }
+    this.shakeMag = Math.max(this.shakeMag, 10);
+    if (Math.random() < 0.5) this.spawnClashRing(c.x, c.y, 120, 18, winBeam.color);
+
+    // lock the loser into a recoil pose and the champ into the pushing pose
+    loser.anim = "hurt"; loser.animTime = 0;
+    champ.anim = "special"; champ.animTime = 0;
+  }
+
+  // Apply the final damage + knockback and tear down the clash state.
+  endClash(c: BeamClash) {
+    const winner = c.winner!;
+    const loser = winner === "p1" ? this.p2 : this.p1;
+    const champ = winner === "p1" ? this.p1 : this.p2;
+    const winBeam = winner === "p1" ? c.p1Beam : c.p2Beam;
+    this.beamExplosion(loser.x, loser.y + 48, winBeam.color, "#ffffff", winBeam.glow);
+    this.spawnClashRing(loser.x, loser.y + 48, 200, 24, winBeam.color);
     this.shakeMag = 30;
     this.hitFlash = 1;
     this.texts.push({
@@ -1232,13 +1496,23 @@ export class FightEngine {
       text: winner === "p1" ? "CLASH WIN!" : "CLASH LOST", life: 60,
       color: winner === "p1" ? "#ffd23b" : "#ff5b5b", size: 34,
     });
-    // big damage + launch (online: only the local winner applies/sends damage)
+    // big damage + huge knockback (push the loser away). Online: only the local
+    // winner applies/sends damage; the server keeps the result identical.
     if (!this.isOnline || winner === "p1") {
-      this.applyDamage(loser, champ, 30, winner, true);
+      this.applyDamage(loser, champ, 32, winner, true);
     }
     this.beams = this.beams.filter((b) => b !== c.p1Beam && b !== c.p2Beam);
     this.beamClash = null;
     this.clashRequested = false;
+    this.targetTimeScale = 1;
+  }
+
+  // Shared clash finisher (explosion + damage). Kept for the offline fast-path
+  // and the server-driven online path; routes into the animated resolve.
+  finishClash(winner: "p1" | "p2") {
+    const c = this.beamClash;
+    if (!c || c.resolved) return;
+    this.beginClashResolve(winner);
   }
 
   // ONLINE: server tells both clients who won the clash.
@@ -1256,6 +1530,34 @@ export class FightEngine {
   setRemoteClashPower(oppPower: number) {
     if (!this.beamClash || this.beamClash.resolved) return;
     this.beamClash.p2Power = oppPower;
+  }
+
+  // Snapshot of the active clash for the HUD overlay (tug-of-war bar). Returns
+  // null when no clash is active. ratio is in [-1,+1] (negative = p1 winning).
+  clashProgress(): { ratio: number; intro: boolean; resolved: boolean; winner: "p1" | "p2" | null } | null {
+    const c = this.beamClash;
+    if (!c) return null;
+    return {
+      ratio: c.ratio,
+      intro: c.intro > 0,
+      resolved: c.resolved,
+      winner: c.winner,
+    };
+  }
+
+  // Emit a shockwave ring at (x,y) that expands to maxR over maxLife frames.
+  spawnClashRing(x: number, y: number, maxR: number, life: number, color: string) {
+    this.clashRings.push({ x, y, r: 8, maxR, life, maxLife: life, color });
+  }
+
+  updateClashRings(step: number) {
+    for (let i = this.clashRings.length - 1; i >= 0; i--) {
+      const ring = this.clashRings[i];
+      ring.life -= step;
+      const t = 1 - ring.life / ring.maxLife;
+      ring.r = 8 + (ring.maxR - 8) * Math.min(1, t);
+      if (ring.life <= 0) this.clashRings.splice(i, 1);
+    }
   }
 
   applyDamage(
@@ -1418,6 +1720,14 @@ export class FightEngine {
   }
 
   updateParticles(step: number) {
+    // Hard cap the particle count. During beam clashes / explosions hundreds
+    // of particles can pile up; each one is drawn with shadowBlur on mobile,
+    // which tanks frame rate. Trimming the oldest keeps clashes flashy but the
+    // GPU bounded.
+    const MAX_PARTICLES = 220;
+    if (this.particles.length > MAX_PARTICLES) {
+      this.particles.splice(0, this.particles.length - MAX_PARTICLES);
+    }
     for (let i = this.particles.length - 1; i >= 0; i--) {
       const p = this.particles[i];
       p.x += p.vx * step;
@@ -1459,6 +1769,7 @@ export class FightEngine {
     this.drawFighter(ctx, this.p1, this.p1Fighter);
     this.drawBeams(ctx);
     this.drawThrownWeapons(ctx);
+    this.drawClashRings(ctx);
     this.drawBeamClash(ctx);
     this.drawParticles(ctx);
     this.drawTexts(ctx);
@@ -2602,24 +2913,28 @@ export class FightEngine {
     }
   }
 
-  // The contested glowing orb at the center of a beam clash.
+  // The contested glowing orb at the center of a beam clash. Grows and shifts
+  // toward the dominating beam's color, and flares on each tap pulse.
   drawBeamClash(ctx: CanvasRenderingContext2D) {
     const c = this.beamClash;
     if (!c) return;
     const c1 = c.p1Beam.color;
     const c2 = c.p2Beam.color;
-    const pulse = 1 + 0.25 * Math.sin(this.bgTime * 3);
-    const r = (46 + Math.min(40, c.time * 0.2)) * pulse;
+    // the dominant color leans toward whoever is winning the mash
+    const p1Dom = (c.ratio + 1) / 2; // 0..1
+    const pulse = 1 + 0.25 * Math.sin(this.bgTime * 3) + c.p1Pulse * 0.4 + c.p2Pulse * 0.4;
+    const baseR = 40 + Math.min(40, c.time * 0.15);
+    const r = baseR * pulse;
 
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
-    // outer blurred aura (blend of both colors)
-    ctx.shadowColor = "#ffffff";
-    ctx.shadowBlur = 50;
+    // outer blurred aura — tinted by whoever is winning
+    ctx.shadowColor = p1Dom > 0.5 ? c1 : c2;
+    ctx.shadowBlur = 14;
     const g = ctx.createRadialGradient(c.x, c.y, 4, c.x, c.y, r);
     g.addColorStop(0, "#ffffff");
-    g.addColorStop(0.4, c1);
-    g.addColorStop(0.7, c2);
+    g.addColorStop(0.35, p1Dom > 0.5 ? c1 : c2);
+    g.addColorStop(0.7, p1Dom > 0.5 ? c2 : c1);
     g.addColorStop(1, "transparent");
     ctx.fillStyle = g;
     ctx.beginPath();
@@ -2627,19 +2942,20 @@ export class FightEngine {
     ctx.fill();
 
     // bright white core
-    ctx.shadowBlur = 24;
+    ctx.shadowBlur = 10;
     ctx.fillStyle = "#ffffff";
     ctx.beginPath();
     ctx.arc(c.x, c.y, r * 0.4 * pulse, 0, Math.PI * 2);
     ctx.fill();
 
-    // crackling lightning arcs radiating out
+    // crackling lightning arcs radiating out (more when lopsided)
+    const arcs = 7 + Math.floor(Math.abs(c.ratio) * 5);
     ctx.strokeStyle = "#ffffff";
     ctx.lineWidth = 2.5;
     ctx.shadowBlur = 14;
-    for (let k = 0; k < 7; k++) {
-      const a = this.bgTime * 0.5 + (k / 7) * Math.PI * 2;
-      const len = r * (0.9 + Math.random() * 0.5);
+    for (let k = 0; k < arcs; k++) {
+      const a = this.bgTime * 0.5 + (k / arcs) * Math.PI * 2;
+      const len = r * (0.9 + Math.random() * 0.6);
       ctx.beginPath();
       ctx.moveTo(c.x, c.y);
       ctx.lineTo(
@@ -2648,7 +2964,36 @@ export class FightEngine {
       );
       ctx.stroke();
     }
+
+    // INTRO: a tight pulsing "struggle" halo while the freeze holds
+    if (c.intro > 0) {
+      const ip = 1 + 0.15 * Math.sin(this.bgTime * 6);
+      ctx.strokeStyle = "rgba(255,255,255,0.8)";
+      ctx.lineWidth = 4;
+      ctx.shadowBlur = 10;
+      ctx.beginPath();
+      ctx.arc(c.x, c.y, r * 1.5 * ip, 0, Math.PI * 2);
+      ctx.stroke();
+    }
     ctx.restore();
+  }
+
+  // Expanding shockwave rings emitted at clash / weapon-clash impact points.
+  drawClashRings(ctx: CanvasRenderingContext2D) {
+    for (const ring of this.clashRings) {
+      const alpha = Math.max(0, ring.life / ring.maxLife);
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      ctx.globalAlpha = alpha * 0.8;
+      ctx.strokeStyle = ring.color;
+      ctx.lineWidth = 4 * alpha + 1;
+      ctx.shadowColor = ring.color;
+      ctx.shadowBlur = 10;
+      ctx.beginPath();
+      ctx.arc(ring.x, ring.y, ring.r, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
   }
 
   drawThrownWeapons(ctx: CanvasRenderingContext2D) {
@@ -2703,15 +3048,15 @@ export class FightEngine {
 
       // 1) wide soft BLUR aura (Kamehameha haze) — drawn big + low alpha
       ctx.shadowColor = glow;
-      ctx.shadowBlur = 55;
+      ctx.shadowBlur = 14;
       beamBody(halfW * 1.9, glow, 0.35);
 
       // 2) main colored beam body
-      ctx.shadowBlur = 30;
+      ctx.shadowBlur = 10;
       beamBody(halfW, b.color, 0.9);
 
       // 3) bright white-hot inner core
-      ctx.shadowBlur = 16;
+      ctx.shadowBlur = 6;
       beamBody(halfW * 0.42, core, 1);
 
       // 4) spiraling energy helix wrapping the beam (Galick Gun swirl)
@@ -2750,7 +3095,7 @@ export class FightEngine {
       mg.addColorStop(0.7, b.color);
       mg.addColorStop(1, glow + "00");
       ctx.globalAlpha = fade;
-      ctx.shadowBlur = 40;
+      ctx.shadowBlur = 14;
       ctx.shadowColor = b.color;
       ctx.fillStyle = mg;
       ctx.beginPath();
@@ -2765,7 +3110,7 @@ export class FightEngine {
       hg.addColorStop(0.65, b.color);
       hg.addColorStop(1, glow + "00");
       ctx.fillStyle = hg;
-      ctx.shadowBlur = 50;
+      ctx.shadowBlur = 14;
       ctx.beginPath();
       ctx.arc(headX, muzzleY, headR, 0, Math.PI * 2);
       ctx.fill();
@@ -2791,17 +3136,23 @@ export class FightEngine {
   }
 
   drawParticles(ctx: CanvasRenderingContext2D) {
+    // PERFORMANCE: batch all particles under a single save/restore. The old
+    // code called save()/restore() + set shadowBlur for EVERY particle — with
+    // 200+ particles during a clash that was the single biggest mobile frame
+    // killer. We keep a light shadow glow but set the state once.
+    if (this.particles.length === 0) return;
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter"; // additive glow, set once
+    ctx.shadowBlur = 8; // smaller blur = much cheaper, still reads as a glow
     for (const p of this.particles) {
-      ctx.save();
       ctx.globalAlpha = Math.max(0, p.life / p.maxLife);
       ctx.fillStyle = p.color;
       ctx.shadowColor = p.color;
-      ctx.shadowBlur = 12;
       ctx.beginPath();
       ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
       ctx.fill();
-      ctx.restore();
     }
+    ctx.restore();
   }
 
   drawTexts(ctx: CanvasRenderingContext2D) {
