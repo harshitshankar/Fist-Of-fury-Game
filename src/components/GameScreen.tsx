@@ -55,6 +55,10 @@ export default function GameScreen(props: Props) {
   const [ready, setReady] = useState(false);
   const [intro, setIntro] = useState(true);
   const [muted, setMuted] = useState(false);
+  // graphics quality — persisted so budget-phone users only set it once.
+  const [lowGfx, setLowGfx] = useState<boolean>(() => {
+    try { return localStorage.getItem("lowGraphics") === "true"; } catch { return false; }
+  });
   const totalRounds = props.rounds && props.rounds > 0 ? props.rounds : 1;
   const roundsToWin = Math.floor(totalRounds / 2) + 1;
   const [roundWins, setRoundWins] = useState({ p1: 0, p2: 0 });
@@ -90,6 +94,7 @@ export default function GameScreen(props: Props) {
       p2Name: props.p2Name,
       online: props.online,
       rounds: totalRounds,
+      lowGraphics: lowGfx,
       callbacks: {
         onHit: (who, dmg) => {
           if (props.online && who === "p1") {
@@ -327,7 +332,7 @@ export default function GameScreen(props: Props) {
         />
       </div>
 
-      {/* Exit + mute buttons */}
+      {/* Exit + mute + graphics quality buttons */}
       <div className="absolute right-2 top-20 z-30 flex gap-1 sm:top-24">
         <button
           onClick={() => {
@@ -340,6 +345,20 @@ export default function GameScreen(props: Props) {
           className="rounded bg-slate-700/80 px-2 py-1 text-xs font-bold text-white"
         >
           {muted ? "🔇" : "🔊"}
+        </button>
+        <button
+          onClick={() => {
+            const next = !lowGfx;
+            setLowGfx(next);
+            try { localStorage.setItem("lowGraphics", String(next)); } catch {}
+            if (engineRef.current) engineRef.current.lowGraphics = next;
+          }}
+          className={`rounded px-2 py-1 text-xs font-bold text-white ${
+            lowGfx ? "bg-green-600/80" : "bg-purple-700/80"
+          }`}
+          title={lowGfx ? "Low graphics — smoother on weak phones" : "High graphics — full effects"}
+        >
+          {lowGfx ? "🔋 LOW" : "⚡ HIGH"}
         </button>
         <button
           onClick={props.onExit}

@@ -214,7 +214,12 @@ export class FightEngine {
   remoteInput: InputState = { ...EMPTY_INPUT };
   // CPU AI decision state
   aiTimer = 0;
-  aiAction: "approach" | "punch" | "kick" | "special" | "jump" | "block" | "retreat" = "approach";
+  aiAction: "approach" | "punch" | "kick" | "special" | "jump" | "block" | "retreat" | "chargeBeam" = "approach";
+  // AI special-beam ritual: telegraph the beam by retreating to the far corner
+  // and showing a warning sign above its head before firing.
+  aiSpecialsThisRound = 0;     // how many specials used this round (cap at 3)
+  aiChargeTimer = 0;           // > 0 = retreating + charging before firing beam
+  aiChargeTargetX = 0;         // the corner x to retreat to before firing
   timeScale = 1;
   targetTimeScale = 1;
   shakeMag = 0;
@@ -226,6 +231,7 @@ export class FightEngine {
   isOnline: boolean;
   // remote snapshot for online opponent
   remoteSnapshot: Partial<FighterState> | null = null;
+  lowGraphics = false; // budget-phone mode: skip expensive GPU effects
   paused = true;
   raf = 0;
   last = 0;
@@ -255,6 +261,7 @@ export class FightEngine {
       p2Name: string;
       online?: boolean;
       rounds?: number;      // total rounds: 1, 3 or 5 (best-of)
+      lowGraphics?: boolean; // budget-phone mode: skip expensive GPU effects
       callbacks?: EngineCallbacks;
     }
   ) {
@@ -264,6 +271,7 @@ export class FightEngine {
     this.p1Fighter = getFighter(opts.p1Id);
     this.p2Fighter = getFighter(opts.p2Id);
     this.isOnline = !!opts.online;
+    this.lowGraphics = !!opts.lowGraphics;
     this.cb = opts.callbacks || {};
     this.totalRounds = opts.rounds && opts.rounds > 0 ? opts.rounds : 1;
     // best-of-N => need majority. (1->1, 3->2, 5->3)
@@ -438,8 +446,16 @@ export class FightEngine {
         if (typeof s.meter === "number") this.p2.meter = s.meter;
         if (typeof (s as any).hurtTime === "number") this.p2.hurtTime = (s as any).hurtTime;
         if (s.anim) {
-          // detect the opponent starting a special -> spawn a visual beam (no local damage)
-          if (s.anim === "special" && this.p2.anim !== "special") {
+          // detect the opponent starting a special -> spawn a visual beam (no local damage).
+          // GUARD: skip while a beam clash is active OR resolving — otherwise the
+          // opponent's still-running "special" animation snapshots re-trigger this
+          // after the clash ends and spawn a phantom beam that does no damage.
+          if (
+            s.anim === "special" &&
+            this.p2.anim !== "special" &&
+            !this.beamClash &&
+            !this.clashRequested
+          ) {
             this.spawnRemoteBeam();
           }
           // detect the opponent throwing their weapon -> spawn visual projectile
@@ -600,6 +616,11 @@ export class FightEngine {
     this.beamClash = null;
     this.clashRequested = false;
     this.clashRings = [];
+    // reset AI brain for the new round
+    this.aiTimer = 0;
+    this.aiAction = "approach";
+    this.aiSpecialsThisRound = 0;
+    this.aiChargeTimer = 0;
     this.roundTimer = this.roundTime;
     this.roundOver = false;
     this.roundWinner = null;
@@ -1502,6 +1523,10 @@ export class FightEngine {
       this.applyDamage(loser, champ, 32, winner, true);
     }
     this.beams = this.beams.filter((b) => b !== c.p1Beam && b !== c.p2Beam);
+    // Clear any OTHER stray beams too (a stale remote "special" snapshot can
+    // spawn a phantom beam right as the clash ends — nuke them so neither
+    // player sees a ghost beam flying after the clash).
+    this.beams = [];
     this.beamClash = null;
     this.clashRequested = false;
     this.targetTimeScale = 1;
@@ -1651,6 +1676,32 @@ export class FightEngine {
     const HIT_RANGE = 80;                      // close enough to land a punch/kick
     const r = { ...EMPTY_INPUT };
 
+    // ---- SPECIAL-BEAM RITUAL ----
+    // When the AI decides to fire its beam, it first retreats to its FAR corner
+    // and charges (a warning sign pops above its head), THEN fires. This gives
+    // the player time to run to the opposite corner and fire back for a clash.
+    if (this.aiChargeTimer > 0) {
+      this.aiChargeTimer -= 1;
+      // keep retreating toward the corner
+      if (self.x < this.aiChargeTargetX - 20) r.right = true;
+      else if (self.x > this.aiChargeTargetX + 20) r.left = true;
+      // face the player while charging
+      // when the charge is done AND we're near the corner AND meter is ready, fire
+      if (
+        this.aiChargeTimer <= 0 &&
+        Math.abs(self.x - this.aiChargeTargetX) < 60 &&
+        self.meter >= 50
+      ) {
+        r.special = true;
+        this.aiSpecialsThisRound += 1;
+      } else if (this.aiChargeTimer <= 0) {
+        // cornered but not ready — wait a bit more
+        this.aiChargeTimer = 20;
+      }
+      this.remoteInput = r;
+      return;
+    }
+
     // AI "think" timer so it commits to an action for a few frames instead of
     // flickering inputs every single frame (which made attacks never fire).
     this.aiTimer -= 1;
@@ -1658,23 +1709,59 @@ export class FightEngine {
     if (this.aiTimer <= 0) {
       // pick a new decision
       if (gap > HIT_RANGE) {
-        this.aiAction = "approach";
-        this.aiTimer = 6;
-      } else {
-        // in striking range — choose an attack and hold it briefly
+        // Out of range — DUMBER, less relentless chasing.
+        // Only approach ~half the time; otherwise idle, jump, or retreat so the
+        // player gets breathing room instead of being hunted constantly.
         const roll = Math.random();
-        if (self.meter >= 50 && roll > 0.85) this.aiAction = "special";
-        else if (roll > 0.55) this.aiAction = "punch";
-        else if (roll > 0.30) this.aiAction = "kick";
-        else if (roll > 0.18) this.aiAction = "block";
-        else if (roll > 0.10) this.aiAction = "retreat";
+        if (roll < 0.45) {
+          // Occasionally decide to set up a special beam (max 3 per round, needs
+          // meter, and not too soon after the round start).
+          if (
+            self.meter >= 50 &&
+            this.aiSpecialsThisRound < 3 &&
+            (this.roundTime - this.roundTimer) > 6 &&
+            Math.random() < 0.35
+          ) {
+            // retreat to the far corner (opposite side from the player) + charge
+            this.aiChargeTargetX = foe.x < WORLD.w / 2 ? WORLD.w - 110 : 110;
+            this.aiChargeTimer = 80; // ~1.3s warning window for the player to react
+            this.aiAction = "chargeBeam";
+            // pop a warning sign above the AI's head
+            this.texts.push({
+              x: self.x, y: self.y - 50,
+              text: "⚠ CHARGING ⚠", life: 75,
+              color: "#ff3b3b", size: 30,
+            });
+            this.aiTimer = 90;
+          } else {
+            this.aiAction = "approach";
+            this.aiTimer = 10 + Math.floor(Math.random() * 8);
+          }
+        } else if (roll < 0.7) {
+          this.aiAction = "retreat";
+          this.aiTimer = 14 + Math.floor(Math.random() * 10);
+        } else if (roll < 0.85) {
+          this.aiAction = "jump";
+          this.aiTimer = 8;
+        } else {
+          this.aiAction = "block";
+          this.aiTimer = 12 + Math.floor(Math.random() * 8);
+        }
+      } else {
+        // in striking range — choose an attack and hold it briefly.
+        // Reduced aggressiveness: more blocking/retreating, fewer hits.
+        const roll = Math.random();
+        if (roll > 0.70) this.aiAction = "punch";
+        else if (roll > 0.50) this.aiAction = "kick";
+        else if (roll > 0.32) this.aiAction = "block";
+        else if (roll > 0.16) this.aiAction = "retreat";
         else this.aiAction = "jump";
         this.aiTimer = 10 + Math.floor(Math.random() * 10);
       }
     }
 
-    // close the gap whenever out of range, regardless of the current action
-    if (gap > HIT_RANGE && this.aiAction !== "block") {
+    // only approach when the committed action actually says to (no blanket chase)
+    if (this.aiAction === "approach" && gap > HIT_RANGE) {
       if (foe.x > self.x) r.right = true;
       else r.left = true;
     }
@@ -1683,11 +1770,13 @@ export class FightEngine {
     switch (this.aiAction) {
       case "punch": if (gap <= HIT_RANGE + 10) r.punch = true; break;
       case "kick": if (gap <= HIT_RANGE + 14) r.kick = true; break;
-      case "special": if (self.meter >= 50) r.special = true; break;
       case "jump": r.jump = true; break;
       case "block": r.block = true; break;
       case "retreat":
         if (foe.x > self.x) r.left = true; else r.right = true;
+        break;
+      case "chargeBeam":
+        // handled by the ritual block above
         break;
     }
 
@@ -1724,7 +1813,7 @@ export class FightEngine {
     // of particles can pile up; each one is drawn with shadowBlur on mobile,
     // which tanks frame rate. Trimming the oldest keeps clashes flashy but the
     // GPU bounded.
-    const MAX_PARTICLES = 220;
+    const MAX_PARTICLES = this.lowGraphics ? 80 : 220;
     if (this.particles.length > MAX_PARTICLES) {
       this.particles.splice(0, this.particles.length - MAX_PARTICLES);
     }
@@ -2197,7 +2286,7 @@ export class FightEngine {
     ctx.translate(0, -h);
     ctx.globalAlpha = build.alpha;
     // silhouette glow for aura/ghost/holy fighters
-    if (build.extra === "aura" || build.glow) {
+    if (!this.lowGraphics && (build.extra === "aura" || build.glow)) {
       ctx.shadowColor = build.glow || f.specialColor;
       ctx.shadowBlur = 18;
     }
@@ -2395,7 +2484,7 @@ export class FightEngine {
       ctx.save();
       ctx.strokeStyle = build.glow || "#ffd23b";
       ctx.shadowColor = build.glow || "#ffd23b";
-      ctx.shadowBlur = 14;
+      ctx.shadowBlur = this.lowGraphics ? 0 : 14;
       ctx.lineWidth = 4;
       ctx.beginPath();
       ctx.ellipse(2, headY - 26, 16, 5, 0, 0, Math.PI * 2);
@@ -2670,7 +2759,7 @@ export class FightEngine {
         // wild flickering flame-hair
         ctx.fillStyle = hairCol;
         ctx.shadowColor = hairCol;
-        ctx.shadowBlur = 12;
+        ctx.shadowBlur = this.lowGraphics ? 0 : 12;
         ctx.beginPath();
         ctx.moveTo(-16, headY - 2);
         for (let i = 0; i <= 6; i++) {
@@ -2885,14 +2974,14 @@ export class FightEngine {
       case "staff": {
         ctx.strokeStyle = handle; ctx.lineWidth = 5;
         ctx.beginPath(); ctx.moveTo(-len * 0.4, 0); ctx.lineTo(len * 0.8, 0); ctx.stroke();
-        ctx.shadowColor = w.trail; ctx.shadowBlur = 16;
+        ctx.shadowColor = w.trail; ctx.shadowBlur = this.lowGraphics ? 0 : 16;
         ctx.fillStyle = c; ctx.beginPath(); ctx.arc(len * 0.9, 0, 9, 0, Math.PI * 2); ctx.fill();
         ctx.shadowBlur = 0;
         break;
       }
       case "shuriken":
       case "chakram": {
-        ctx.fillStyle = c; ctx.shadowColor = w.trail; ctx.shadowBlur = 12;
+        ctx.fillStyle = c; ctx.shadowColor = w.trail; ctx.shadowBlur = this.lowGraphics ? 0 : 12;
         if (w.type === "shuriken") {
           for (let k = 0; k < 4; k++) {
             ctx.save(); ctx.rotate((k * Math.PI) / 2);
@@ -2930,7 +3019,7 @@ export class FightEngine {
     ctx.globalCompositeOperation = "lighter";
     // outer blurred aura — tinted by whoever is winning
     ctx.shadowColor = p1Dom > 0.5 ? c1 : c2;
-    ctx.shadowBlur = 14;
+    ctx.shadowBlur = this.lowGraphics ? 0 : 14;
     const g = ctx.createRadialGradient(c.x, c.y, 4, c.x, c.y, r);
     g.addColorStop(0, "#ffffff");
     g.addColorStop(0.35, p1Dom > 0.5 ? c1 : c2);
@@ -2942,27 +3031,30 @@ export class FightEngine {
     ctx.fill();
 
     // bright white core
-    ctx.shadowBlur = 10;
+    ctx.shadowBlur = this.lowGraphics ? 0 : 10;
     ctx.fillStyle = "#ffffff";
     ctx.beginPath();
     ctx.arc(c.x, c.y, r * 0.4 * pulse, 0, Math.PI * 2);
     ctx.fill();
 
     // crackling lightning arcs radiating out (more when lopsided)
-    const arcs = 7 + Math.floor(Math.abs(c.ratio) * 5);
-    ctx.strokeStyle = "#ffffff";
-    ctx.lineWidth = 2.5;
-    ctx.shadowBlur = 14;
-    for (let k = 0; k < arcs; k++) {
-      const a = this.bgTime * 0.5 + (k / arcs) * Math.PI * 2;
-      const len = r * (0.9 + Math.random() * 0.6);
-      ctx.beginPath();
-      ctx.moveTo(c.x, c.y);
-      ctx.lineTo(
-        c.x + Math.cos(a) * len + (Math.random() - 0.5) * 14,
-        c.y + Math.sin(a) * len + (Math.random() - 0.5) * 14
-      );
-      ctx.stroke();
+    // SKIP in low-graphics mode
+    if (!this.lowGraphics) {
+      const arcs = 7 + Math.floor(Math.abs(c.ratio) * 5);
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 2.5;
+      ctx.shadowBlur = 14;
+      for (let k = 0; k < arcs; k++) {
+        const a = this.bgTime * 0.5 + (k / arcs) * Math.PI * 2;
+        const len = r * (0.9 + Math.random() * 0.6);
+        ctx.beginPath();
+        ctx.moveTo(c.x, c.y);
+        ctx.lineTo(
+          c.x + Math.cos(a) * len + (Math.random() - 0.5) * 14,
+          c.y + Math.sin(a) * len + (Math.random() - 0.5) * 14
+        );
+        ctx.stroke();
+      }
     }
 
     // INTRO: a tight pulsing "struggle" halo while the freeze holds
@@ -2970,7 +3062,7 @@ export class FightEngine {
       const ip = 1 + 0.15 * Math.sin(this.bgTime * 6);
       ctx.strokeStyle = "rgba(255,255,255,0.8)";
       ctx.lineWidth = 4;
-      ctx.shadowBlur = 10;
+      ctx.shadowBlur = this.lowGraphics ? 0 : 10;
       ctx.beginPath();
       ctx.arc(c.x, c.y, r * 1.5 * ip, 0, Math.PI * 2);
       ctx.stroke();
@@ -2988,7 +3080,7 @@ export class FightEngine {
       ctx.strokeStyle = ring.color;
       ctx.lineWidth = 4 * alpha + 1;
       ctx.shadowColor = ring.color;
-      ctx.shadowBlur = 10;
+      ctx.shadowBlur = this.lowGraphics ? 0 : 10;
       ctx.beginPath();
       ctx.arc(ring.x, ring.y, ring.r, 0, Math.PI * 2);
       ctx.stroke();
@@ -3004,7 +3096,7 @@ export class FightEngine {
       ctx.rotate(tw.spins ? tw.rot : 0);
       const w = getWeapon(tw.fighterId);
       ctx.shadowColor = w.trail;
-      ctx.shadowBlur = 14;
+      ctx.shadowBlur = this.lowGraphics ? 0 : 14;
       this.drawWeaponShape(ctx, tw.fighterId, w.length);
       ctx.restore();
     }
@@ -3048,43 +3140,48 @@ export class FightEngine {
 
       // 1) wide soft BLUR aura (Kamehameha haze) — drawn big + low alpha
       ctx.shadowColor = glow;
-      ctx.shadowBlur = 14;
+      ctx.shadowBlur = this.lowGraphics ? 0 : 14;
       beamBody(halfW * 1.9, glow, 0.35);
 
       // 2) main colored beam body
-      ctx.shadowBlur = 10;
+      ctx.shadowBlur = this.lowGraphics ? 0 : 10;
       beamBody(halfW, b.color, 0.9);
 
       // 3) bright white-hot inner core
-      ctx.shadowBlur = 6;
+      ctx.shadowBlur = this.lowGraphics ? 0 : 6;
       beamBody(halfW * 0.42, core, 1);
 
       // 4) spiraling energy helix wrapping the beam (Galick Gun swirl)
-      ctx.globalAlpha = fade;
-      ctx.strokeStyle = core;
-      ctx.lineWidth = 4;
-      ctx.shadowBlur = 14;
-      ctx.shadowColor = b.color;
-      for (let s = 0; s < 2; s++) {
-        ctx.beginPath();
-        const phase = this.bgTime * 0.35 + s * Math.PI;
-        for (let p = 0; p <= 1.0001; p += 0.06) {
-          const px = muzzleX + len * p;
-          const wob = Math.sin(p * 14 + phase) * halfW * 0.7;
-          if (p === 0) ctx.moveTo(px, muzzleY + wob);
-          else ctx.lineTo(px, muzzleY + wob);
+      //    SKIP in low-graphics mode (34+ shadow-blur strokes per beam)
+      if (!this.lowGraphics) {
+        ctx.globalAlpha = fade;
+        ctx.strokeStyle = core;
+        ctx.lineWidth = 4;
+        ctx.shadowBlur = 14;
+        ctx.shadowColor = b.color;
+        for (let s = 0; s < 2; s++) {
+          ctx.beginPath();
+          const phase = this.bgTime * 0.35 + s * Math.PI;
+          for (let p = 0; p <= 1.0001; p += 0.06) {
+            const px = muzzleX + len * p;
+            const wob = Math.sin(p * 14 + phase) * halfW * 0.7;
+            if (p === 0) ctx.moveTo(px, muzzleY + wob);
+            else ctx.lineTo(px, muzzleY + wob);
+          }
+          ctx.stroke();
         }
-        ctx.stroke();
       }
 
-      // 5) travelling energy rings
-      ctx.fillStyle = core;
-      ctx.globalAlpha = fade * 0.8;
-      for (let r = 0; r < 5; r++) {
-        const rx = muzzleX + (((this.bgTime * 18 + r * 55) % absLen)) * b.dir;
-        ctx.beginPath();
-        ctx.ellipse(rx, muzzleY, 5, halfW * 0.85, 0, 0, Math.PI * 2);
-        ctx.fill();
+      // 5) travelling energy rings — SKIP in low-graphics mode
+      if (!this.lowGraphics) {
+        ctx.fillStyle = core;
+        ctx.globalAlpha = fade * 0.8;
+        for (let r = 0; r < 5; r++) {
+          const rx = muzzleX + (((this.bgTime * 18 + r * 55) % absLen)) * b.dir;
+          ctx.beginPath();
+          ctx.ellipse(rx, muzzleY, 5, halfW * 0.85, 0, 0, Math.PI * 2);
+          ctx.fill();
+        }
       }
 
       // 6) CHARGE / muzzle orb at the hand (big pulsing sphere)
@@ -3095,7 +3192,7 @@ export class FightEngine {
       mg.addColorStop(0.7, b.color);
       mg.addColorStop(1, glow + "00");
       ctx.globalAlpha = fade;
-      ctx.shadowBlur = 14;
+      ctx.shadowBlur = this.lowGraphics ? 0 : 14;
       ctx.shadowColor = b.color;
       ctx.fillStyle = mg;
       ctx.beginPath();
@@ -3110,25 +3207,27 @@ export class FightEngine {
       hg.addColorStop(0.65, b.color);
       hg.addColorStop(1, glow + "00");
       ctx.fillStyle = hg;
-      ctx.shadowBlur = 14;
+      ctx.shadowBlur = this.lowGraphics ? 0 : 14;
       ctx.beginPath();
       ctx.arc(headX, muzzleY, headR, 0, Math.PI * 2);
       ctx.fill();
 
-      // 8) lightning sparks darting off the head
-      ctx.globalAlpha = fade;
-      ctx.strokeStyle = core;
-      ctx.lineWidth = 2.5;
-      ctx.shadowBlur = 10;
-      for (let k = 0; k < 4; k++) {
-        const a = this.bgTime * 0.6 + (k * Math.PI) / 2;
-        ctx.beginPath();
-        ctx.moveTo(headX, muzzleY);
-        ctx.lineTo(
-          headX + Math.cos(a) * headR * 1.3,
-          muzzleY + Math.sin(a) * headR * 1.3
-        );
-        ctx.stroke();
+      // 8) lightning sparks darting off the head — SKIP in low-graphics mode
+      if (!this.lowGraphics) {
+        ctx.globalAlpha = fade;
+        ctx.strokeStyle = core;
+        ctx.lineWidth = 2.5;
+        ctx.shadowBlur = 10;
+        for (let k = 0; k < 4; k++) {
+          const a = this.bgTime * 0.6 + (k * Math.PI) / 2;
+          ctx.beginPath();
+          ctx.moveTo(headX, muzzleY);
+          ctx.lineTo(
+            headX + Math.cos(a) * headR * 1.3,
+            muzzleY + Math.sin(a) * headR * 1.3
+          );
+          ctx.stroke();
+        }
       }
 
       ctx.restore();
@@ -3143,7 +3242,7 @@ export class FightEngine {
     if (this.particles.length === 0) return;
     ctx.save();
     ctx.globalCompositeOperation = "lighter"; // additive glow, set once
-    ctx.shadowBlur = 8; // smaller blur = much cheaper, still reads as a glow
+    ctx.shadowBlur = this.lowGraphics ? 0 : 8; // no blur in low-gfx mode (biggest GPU saver)
     for (const p of this.particles) {
       ctx.globalAlpha = Math.max(0, p.life / p.maxLife);
       ctx.fillStyle = p.color;
