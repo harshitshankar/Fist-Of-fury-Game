@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0a0a2e" />
+    <meta
+      name="description"
+      content="About Fist of Fury — a free online multiplayer fighting game. Learn how to play online with friends using room codes, master the beam clash system, use voice chat, and pick from 24 unique fighters across 24 arenas."
+    />
+    <meta name="robots" content="index, follow" />
+    <title>About — How to Play Fist of Fury Online Fighting Game</title>
+
+    <!--
+      AdSense is loaded ONLY on the real website, NOT inside the Android WebView app.
+      The Capacitor native app uses AdMob (see App.tsx). Mixing AdSense inside a
+      WebView violates Google AdSense policy.
+    -->
+    <script
+      async
+      src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6063172558757532"
+      crossorigin="anonymous"></script>
+
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      :root {
+        --bg: #0a0a2e;
+        --bg2: #1a1040;
+        --card: rgba(255, 255, 255, 0.05);
+        --border: rgba(255, 165, 0, 0.25);
+        --orange: #ff8c00;
+        --yellow: #ffd23b;
+        --text: #f5f5f5;
+        --muted: #b8b8d0;
+      }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        background: linear-gradient(180deg, var(--bg) 0%, var(--bg2) 60%, #2a0a3e 100%);
+        color: var(--text);
+        line-height: 1.7;
+        min-height: 100vh;
+      }
+      .wrap { max-width: 820px; margin: 0 auto; padding: 24px 18px 80px; }
+      h1 {
+        font-size: clamp(2rem, 6vw, 3rem);
+        font-weight: 900;
+        text-align: center;
+        background: linear-gradient(90deg, #ffd23b, #ff8c00, #e63946);
+        -webkit-background-clip: text;
+        background-clip: text;
+        -webkit-text-fill-color: transparent;
+        margin-bottom: 6px;
+      }
+      .tagline {
+        text-align: center; color: var(--orange); font-weight: 700;
+        letter-spacing: 3px; font-size: 0.8rem; text-transform: uppercase;
+        margin-bottom: 28px;
+      }
+      h2 {
+        font-size: clamp(1.4rem, 4vw, 1.9rem); font-weight: 800;
+        color: var(--yellow); margin: 36px 0 14px; padding-bottom: 8px;
+        border-bottom: 2px solid var(--border);
+      }
+      h3 { font-size: 1.15rem; font-weight: 700; color: var(--orange); margin: 22px 0 8px; }
+      p { margin-bottom: 14px; color: var(--text); }
+      ul, ol { margin: 0 0 16px 22px; }
+      li { margin-bottom: 8px; color: var(--muted); }
+      li strong { color: var(--text); }
+      .card {
+        background: var(--card); border: 1px solid var(--border);
+        border-radius: 16px; padding: 20px; margin: 14px 0;
+      }
+      .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin: 16px 0; }
+      .feature {
+        background: var(--card); border: 1px solid var(--border);
+        border-radius: 14px; padding: 18px;
+      }
+      .feature .icon { font-size: 2rem; display: block; margin-bottom: 8px; }
+      .feature h3 { margin-top: 0; }
+      table { width: 100%; border-collapse: collapse; margin: 14px 0; }
+      th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.08); font-size: 0.95rem; }
+      th { color: var(--yellow); font-weight: 800; }
+      td code { background: rgba(0,0,0,0.4); padding: 2px 8px; border-radius: 6px; color: #6ad1ff; font-weight: 700; }
+      .cta {
+        display: block; text-align: center; text-decoration: none;
+        margin: 28px auto 0; max-width: 340px; padding: 16px;
+        background: linear-gradient(90deg, #22c55e, #059669);
+        color: #fff; font-weight: 900; font-size: 1.2rem; border-radius: 14px;
+        box-shadow: 0 6px 24px rgba(34, 197, 94, 0.4);
+      }
+      .cta:hover { transform: translateY(-2px); }
+      .warn {
+        background: rgba(255, 200, 0, 0.1); border: 1px solid rgba(255, 200, 0, 0.4);
+        border-radius: 12px; padding: 14px 18px; margin: 14px 0;
+      }
+      .warn strong { color: var(--yellow); }
+      footer { text-align: center; margin-top: 40px; color: var(--muted); font-size: 0.85rem; }
+      footer a { color: var(--orange); text-decoration: none; }
+      .nav-top {
+        display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;
+        margin-bottom: 24px;
+      }
+      .nav-top a {
+        color: var(--orange); text-decoration: none; font-weight: 700;
+        padding: 6px 14px; border: 1px solid var(--border); border-radius: 20px;
+        font-size: 0.85rem;
+      }
+      .nav-top a:hover { background: rgba(255, 140, 0, 0.15); }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="nav-top">
+        <a href="/">🎮 Play Now</a>
+        <a href="/about.html">📖 About</a>
+        <a href="/privacy.html">🔐 Privacy Policy</a>
+      </div>
+
+      <h1>🥊 Fist of Fury</h1>
+      <p class="tagline">Online Multiplayer Fighting Game</p>
+
+      <p>
+        <strong>Fist of Fury</strong> is a free, browser-based fighting game you can play
+        right now — no download, no sign-up, no installation. Challenge a friend to a real-time
+        online duel from anywhere in the world using a simple room code, or sharpen your skills
+        against the built-in CPU opponent. Inspired by arcade classics like
+        <strong>Tekken</strong> and <strong>Dragon Ball FighterZ</strong>, the game combines
+        responsive touch controls, dramatic energy-beam clashes, and a roster of 24 unique
+        fighters across 24 hand-crafted arenas.
+      </p>
+
+      <!-- AdSense slot on the about page -->
+      <div style="margin: 24px 0;">
+        <ins class="adsbygoogle" style="display:block"
+             data-ad-client="ca-pub-6063172558757532"
+             data-ad-slot="9580073167"
+             data-ad-format="auto"
+             data-full-width-responsive="true"></ins>
+        <script>(adsbygoogle = window.adsbygoogle || []).push({});</script>
+      </div>
+
+      <h2>🎯 What Is Fist of Fury?</h2>
+      <p>
+        Fist of Fury is a 2D fighting game built entirely with modern web technology
+        (React, TypeScript, and the HTML5 Canvas). It runs smoothly in any modern browser
+        — on your phone, tablet, laptop, or desktop — and is also available as a native
+        Android app for an even smoother experience on mobile. The whole game is
+        optimized for portrait-to-landscape mobile play with on-screen touch buttons,
+        while desktop players get full keyboard support.
+      </p>
+      <p>
+        The goal is simple: <strong>deplete your opponent's health bar before they deplete yours</strong>.
+        Land punches, kicks, and throws to build your blue <strong>meter</strong>, and once it's
+        charged past 50%, unleash your fighter's signature <strong>special beam attack</strong> —
+        a Kamehameha-style energy blast that launches your foe across the arena.
+      </p>
+
+      <h2>✨ Key Features</h2>
+      <div class="grid">
+        <div class="feature">
+          <span class="icon">🌐</span>
+          <h3>Real Online Multiplayer</h3>
+          <p>Create a room, share the 5-letter code, and your friend joins instantly from any device on any network. Each room holds exactly two players.</p>
+        </div>
+        <div class="feature">
+          <span class="icon">⚡</span>
+          <h3>DBZ-Style Beam Clashes</h3>
+          <p>When two beams collide, a dramatic tug-of-war mini-game begins. Mash your buttons faster to overpower your opponent, grow your beam, and disintegrate theirs.</p>
+        </div>
+        <div class="feature">
+          <span class="icon">🥊</span>
+          <h3>24 Unique Fighters</h3>
+          <p>Each character has distinct stats, fighting style, signature move, colored energy beam, and a unique silhouette — tails, capes, wings, halos and more.</p>
+        </div>
+        <div class="feature">
+          <span class="icon">🗺️</span>
+          <h3>24 Detailed Arenas</h3>
+          <p>From the Ancient Dojo to the Cosmic Void, every arena has animated scenery and its own procedurally-composed battle music track.</p>
+        </div>
+        <div class="feature">
+          <span class="icon">🎙️</span>
+          <h3>Voice &amp; Text Chat</h3>
+          <p>Taunt your rival in real time with peer-to-peer WebRTC voice chat (audio never touches the server) or use the in-room text chat.</p>
+        </div>
+        <div class="feature">
+          <span class="icon">🏆</span>
+          <h3>Victory Mate Slow-Mo</h3>
+          <p>Every KO triggers a cinematic slow-motion finish with confetti — a satisfying end to every hard-fought round.</p>
+        </div>
+        <div class="feature">
+          <span class="icon">🤖</span>
+          <h3>Practice vs CPU</h3>
+          <p>No friend online? Fight the AI. The CPU retreats to charge its beam (with a visible warning!) so you can set up epic beam clashes in solo practice.</p>
+        </div>
+        <div class="feature">
+          <span class="icon">🔋</span>
+          <h3>Low &amp; High Graphics Modes</h3>
+          <p>A built-in quality toggle lets weaker phones run smoothly. Switch to <strong>Low</strong> mode on budget devices for a steady frame rate during beam clashes.</p>
+        </div>
+      </div>
+
+      <h2>🎮 How to Play</h2>
+
+      <h3>1. Online Multiplayer (Play With a Friend)</h3>
+      <ol>
+        <li>Open the game and type your name.</li>
+        <li>Tap <strong>CREATE ROOM</strong> — you'll get a 5-letter code (e.g. <code>K7H2P</code>).</li>
+        <li>Send that code to your friend via any messenger.</li>
+        <li>Your friend opens the same website, enters the code, and taps <strong>JOIN ROOM</strong>.</li>
+        <li>Both players tap <strong>I'M READY</strong> — a 3-2-1 countdown begins, then <strong>FIGHT!</strong></li>
+      </ol>
+      <p>Rooms are strictly limited to two players. If a third person tries the same code, they'll see <em>"Room is already full"</em> until someone leaves.</p>
+
+      <h3>2. Practice Mode (Play vs CPU)</h3>
+      <p>
+        If you want to practice alone or your friend isn't online, tap <strong>PLAY vs CPU</strong>.
+        You'll fight an AI opponent that uses punches, kicks, blocks, and special beams. Watch for
+        the <strong>⚠ CHARGING ⚠</strong> warning above the CPU's head — when you see it, run to the
+        opposite corner and fire your own beam to trigger a dramatic beam clash!
+      </p>
+
+      <h3>3. Controls</h3>
+      <table>
+        <thead>
+          <tr><th>Action</th><th>Touch Button</th><th>Keyboard</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Move</td><td>◀ ▶</td><td><code>A</code> / <code>D</code> or arrow keys</td></tr>
+          <tr><td>Jump</td><td>JUMP ▲</td><td><code>W</code> / <code>Space</code></td></tr>
+          <tr><td>Punch</td><td>👊 PUNCH</td><td><code>J</code></td></tr>
+          <tr><td>Kick</td><td>🦵 KICK</td><td><code>K</code></td></tr>
+          <tr><td>Block</td><td>🛡 BLOCK</td><td><code>L</code></td></tr>
+          <tr><td>Special Beam</td><td>💥 SPECIAL</td><td><code>U</code> (needs 50% meter)</td></tr>
+          <tr><td>Draw / Holster Weapon</td><td>🗡 button</td><td><code>P</code></td></tr>
+          <tr><td>Use Weapon</td><td>⚔ button</td><td><code>I</code></td></tr>
+          <tr><td>Throw Weapon</td><td>🌀 button</td><td><code>O</code></td></tr>
+        </tbody>
+      </table>
+
+      <h2>⚡ The Beam Clash System</h2>
+      <p>
+        The signature mechanic of Fist of Fury. When two fighters fire their special beams at
+        each other and the beams meet head-on, the game enters a cinematic <strong>beam clash</strong>:
+      </p>
+      <ul>
+        <li><strong>Intro:</strong> Time slows down, shockwave rings ripple outward, and a <em>"BEAM CLASH!"</em> banner appears.</li>
+        <li><strong>Mash phase:</strong> A glowing orb sits between the two beams. Tap <strong>PUNCH</strong> or <strong>SPECIAL</strong> as fast as you can. The more you mash, the more your beam grows and pushes the orb toward your opponent.</li>
+        <li><strong>Resolve:</strong> The winner's beam surges forward and the loser's beam <strong>disintegrates into sparks</strong>, dealing big damage and launching them across the arena.</li>
+      </ul>
+      <p>
+        A tug-of-war bar at the top of the screen shows who's winning in real time, so you always
+        know whether to mash harder. In online play the result is server-authoritative — both
+        players always see the same outcome.
+      </p>
+
+      <h2>🔋 Graphics Quality: High vs Low Mode</h2>
+      <p>
+        Not all phones are equally powerful. That's why Fist of Fury has a built-in
+        <strong> graphics quality toggle</strong> (the <code>⚡ HIGH</code> / <code>🔋 LOW</code> button
+        in the top-right corner of the fight screen).
+      </p>
+      <div class="card">
+        <h3>⚡ HIGH Mode (Default)</h3>
+        <p>Full visual effects: spiraling beam helixes, travelling energy rings, lightning sparks, particle glow, and smooth blur. Best for modern phones (e.g. Samsung Galaxy S20 FE, Pixel 6, iPhone 13+) and desktop computers.</p>
+      </div>
+      <div class="card">
+        <h3>🔋 LOW Mode (For budget phones)</h3>
+        <p>Disables the most GPU-intensive effects (beam spirals, rings, lightning, particle blur) and reduces the particle cap from 220 to 80. The game still looks great and plays identically, but runs at a smooth frame rate on weaker hardware like the Samsung Galaxy A22, Redmi Note series, or older devices. Your setting is saved automatically — set it once and it sticks.</p>
+      </div>
+      <p><strong>Tip:</strong> If you experience lag during beam clashes, switch to LOW mode.</p>
+
+      <h2>🌐 Do I Need an Internet Connection?</h2>
+      <div class="card">
+        <h3>🎮 vs CPU — Works Offline</h3>
+        <p><strong>Play vs CPU</strong> mode runs entirely on your device. Once the game has loaded in your browser, you can play against the AI with no internet connection at all.</p>
+      </div>
+      <div class="card">
+        <h3>🛡️ Online Multiplayer — Needs Internet &amp; a Live Server</h3>
+        <p>
+          <strong>Create Room</strong> and <strong>Join Room</strong> require an active internet
+          connection because they connect to the game server (hosted on Render). The server handles
+          room codes, matchmaking, and relays the fight data between the two players in real time.
+          <strong>Without the server running, online mode will show "Can't reach the game server."</strong>
+        </p>
+      </div>
+
+      <h2>⏱️ Why Does the First Load Take a Few Seconds?</h2>
+      <p>
+        The game is hosted on Render's free plan. Free Render services <strong>sleep after ~15 minutes
+        of inactivity</strong> to save resources. When you (or your friend) visit the game after it's
+        been sleeping, the server takes <strong>30–50 seconds to wake up</strong> on the very first
+        request. You'll see a brief loading state — just wait, and it connects normally. After that,
+        every subsequent visit is fast until the server goes idle again.
+      </p>
+      <p>
+        This is normal behavior for free-tier cloud hosting and not a bug. Once both players are
+        connected and in a room, the real-time fight stays smooth.
+      </p>
+
+      <h2>🗺️ The Fighter Roster</h2>
+      <p>Fist of Fury features 24 playable fighters, each with a unique identity:</p>
+      <ul>
+        <li><strong>Elemental warriors:</strong> Blaze 🔥, Frost ❄️, Volt ⚡, Venom 🐍, Magma 🌋, Aqua 🌊, Tempest 🌪️, Inferna 💃</li>
+        <li><strong>Heavy bruisers:</strong> Goliath 🦏, Titan 🛡️, Kaiju 🦖, Ragnar 🪓</li>
+        <li><strong>Mystical fighters:</strong> Phantom 👻, Seraph 👼, Reaper 💀, Mystic 🔮, Celesta ✨, Lumen 🌈</li>
+        <li><strong>Speed &amp; technique:</strong> Ronin ⚔️, Nova 🌟, Obsidian 🖤, Spark 🛹, Blade 🗡️, Drakon 🐲</li>
+      </ul>
+      <p>
+        Every fighter has a distinct body silhouette, a unique special beam color, and themed
+        accessories — Goliath and Titan are massive and bulky, Phantom is translucent, Kaiju and
+        Drakon have swaying tails, Seraph has wings, Celesta wears a halo, Reaper and Mystic wear
+        hooded capes, and Blaze has living flame hair.
+      </p>
+
+      <h2>💰 Ads &amp; Monetization (How This Game Stays Free)</h2>
+      <p>
+        Fist of Fury is completely free to play. To keep it that way, the game is supported by ads
+        — but ads are placed <strong>responsibly and in line with Google's policies</strong>:
+      </p>
+      <ul>
+        <li><strong>On the website (this page):</strong> Google AdSense display ads may appear. These only load in a real browser — never inside the Android app.</li>
+        <li><strong>In the Android app:</strong> Google AdMob banner and interstitial ads. AdMob is the correct ad network for mobile apps (AdSense is not used inside the app, per Google's policy).</li>
+        <li><strong>During gameplay:</strong> No ads are shown while you're actively fighting. Ads only appear on menus (lobby / waiting room) and between matches.</li>
+      </ul>
+
+      <h2>🔐 Privacy</h2>
+      <p>
+        Fist of Fury does not require an account and stores no personal data. Room codes and chat
+        messages live only in the server's memory while a room is active and are deleted the moment
+        the room empties. Voice chat is peer-to-peer (WebRTC) — your audio goes directly to the other
+        player and never passes through the server. Read the full
+        <a href="/privacy.html" style="color: var(--orange);">Privacy Policy</a>.
+      </p>
+
+      <div class="warn">
+        <strong>🎧 Voice Chat Tip:</strong> Always use headphones or earphones when enabling voice
+        chat to avoid echo and feedback. The game will ask for microphone permission the first time
+        you turn it on — tap <em>Allow</em>.
+      </div>
+
+      <h2>❓ Frequently Asked Questions</h2>
+
+      <h3>Can I play on iPhone?</h3>
+      <p>Yes — the web version works in Safari on iPhone and iPad. An iOS app is not yet available, but the browser version is fully featured.</p>
+
+      <h3>My friend can't join my room. What's wrong?</h3>
+      <p>Make sure the game server is awake (see the cold-start note above), that both of you are using the exact same 5-letter code, and that neither of you has a third player already in the room. Rooms are strictly two-player.</p>
+
+      <h3>The game feels laggy on my phone. What can I do?</h3>
+      <p>Switch to <strong>🔋 LOW</strong> graphics mode using the button in the top-right of the fight screen. This disables the heaviest visual effects and keeps beam clashes smooth on budget devices.</p>
+
+      <h3>Does the beam clash look the same on both players' screens?</h3>
+      <p>Yes. In online play the clash is coordinated by the server and the result is authoritative — both players always see the same winner and the same dramatic disintegration.</p>
+
+      <h3>Is Fist of Fury really free?</h3>
+      <p>Yes, 100% free with no pay-to-win mechanics. Ads only appear on menus and between matches, never during active gameplay.</p>
+
+      <a class="cta" href="/">▶ PLAY FIST OF FURY NOW</a>
+
+      <footer>
+        <p>&copy; 2026 Fist of Fury. A free online fighting game.</p>
+        <p>
+          <a href="/">Play</a> &nbsp;•&nbsp;
+          <a href="/about.html">About</a> &nbsp;•&nbsp;
+          <a href="/privacy.html">Privacy Policy</a>
+        </p>
+      </footer>
+    </div>
+  </body>
+</html>

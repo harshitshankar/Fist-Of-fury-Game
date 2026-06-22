@@ -57,11 +57,27 @@ try {
   /* non-fatal */
 }
 
+// Ensure about.html is also available inside dist/ (for static hosts / PWABuilder).
+try {
+  const aboutSrc = path.join(__dirname, "about.html");
+  const aboutDest = path.join(distPath, "about.html");
+  if (existsSync(aboutSrc) && existsSync(distPath) && !existsSync(aboutDest)) {
+    copyFileSync(aboutSrc, aboutDest);
+  }
+} catch {
+  /* non-fatal */
+}
+
 app.use(express.static(distPath));
 
 // privacy policy (required for Play Store / app stores)
 app.get("/privacy.html", (_req, res) => {
   res.sendFile(path.join(__dirname, "privacy.html"));
+});
+
+// about page (rich textual content for AdSense approval + SEO)
+app.get(["/about", "/about.html"], (_req, res) => {
+  res.sendFile(path.join(__dirname, "about.html"));
 });
 
 app.get("/health", (_req, res) => res.json({ ok: true, rooms: rooms.size }));

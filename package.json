@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && node -e \"const fs=require('fs');['privacy.html','about.html'].forEach(f=>{if(fs.existsSync(f)&&fs.existsSync('dist'))fs.copyFileSync(f,'dist/'+f)})\"",
     "preview": "vite preview"
   },
   "dependencies": {

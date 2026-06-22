@@ -41,6 +41,7 @@ export default function Lobby({ onCreate, onJoin, onSolo, error, connecting }: P
   const [mapId, setMapId] = useState(MAPS[0].id);
   const [rounds, setRounds] = useState(3);
   const [musicOn, setMusicOn] = useState(isMusicEnabled());
+  const [showHelp, setShowHelp] = useState(false);
   const startedRef = useRef(false);
   const isNativeApp = typeof window !== "undefined" && !!((window as any).Capacitor?.isNativePlatform?.());
 
@@ -308,6 +309,56 @@ export default function Lobby({ onCreate, onJoin, onSolo, error, connecting }: P
           Share your ROOM CODE with a friend to fight online. One creates, one joins —
           rooms hold exactly 2 players.
         </p>
+
+        {/* Help / About panel */}
+        <div className="rounded-2xl border border-orange-500/30 bg-black/40 p-4">
+          <button
+            onClick={() => setShowHelp((s) => !s)}
+            className="flex w-full items-center justify-between text-left"
+          >
+            <span className="text-sm font-black text-orange-400">📖 HOW TO PLAY &amp; FEATURES</span>
+            <span className="text-orange-400">{showHelp ? "▲" : "▼"}</span>
+          </button>
+
+          {showHelp && (
+            <div className="mt-3 space-y-3 text-xs text-white/80">
+              <div>
+                <p className="font-black text-orange-300">🛡️ Online Multiplayer</p>
+                <p className="mt-1">One player taps <b>CREATE ROOM</b> and shares the 5-letter code. The other enters it and taps <b>JOIN ROOM</b>. Both tap <b>I&apos;M READY</b> → countdown → FIGHT!</p>
+              </div>
+              <div>
+                <p className="font-black text-orange-300">🤖 Play vs CPU</p>
+                <p className="mt-1">Practice offline against the AI. Watch for the <b>⚠ CHARGING ⚠</b> warning above its head — run to the opposite corner and fire your beam to trigger a beam clash!</p>
+              </div>
+              <div>
+                <p className="font-black text-orange-300">⚡ Beam Clashes</p>
+                <p className="mt-1">When two beams collide, time slows and a tug-of-war begins. <b>Mash PUNCH / SPECIAL</b> faster than your opponent to overpower their beam and disintegrate it.</p>
+              </div>
+              <div>
+                <p className="font-black text-orange-300">🔋 Graphics Quality (in fight)</p>
+                <p className="mt-1">Tap <b className="text-purple-300">⚡ HIGH</b> / <b className="text-green-300">🔋 LOW</b> in the top-right of the fight screen. Use <b>LOW</b> on weaker phones (e.g. Samsung A22) for smooth beam clashes — your choice is saved automatically.</p>
+              </div>
+              <div>
+                <p className="font-black text-orange-300">🌐 Internet &amp; Server</p>
+                <p className="mt-1"><b>vs CPU</b> works fully offline. <b>Online</b> needs the game server running. The free server sleeps when idle — the <b>first load takes 30–50 seconds</b> to wake up, then it&apos;s fast. Just wait on the loading screen.</p>
+              </div>
+              <div>
+                <p className="font-black text-orange-300">🎧 Voice Chat</p>
+                <p className="mt-1">Enable it in the lobby and tick the box. <b>Always use headphones</b> to avoid echo. The browser will ask for mic permission — allow it.</p>
+              </div>
+              {!isNativeApp && (
+                <a
+                  href="/about.html"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-2 block rounded-xl border border-orange-400/40 bg-orange-500/10 py-2 text-center text-xs font-black text-orange-300 active:scale-95"
+                >
+                  📖 Read the full About page →
+                </a>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
