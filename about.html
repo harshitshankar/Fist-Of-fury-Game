@@ -16,10 +16,20 @@
       The Capacitor native app uses AdMob (see App.tsx). Mixing AdSense inside a
       WebView violates Google AdSense policy.
     -->
-    <script
-      async
-      src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6063172558757532"
-      crossorigin="anonymous"></script>
+    <script>
+      // Only inject the AdSense script when running on a real browser (website),
+      // never inside the Capacitor/Cordova WebView (Android app).
+      (function() {
+        var isNativeApp = window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform();
+        if (!isNativeApp) {
+          var s = document.createElement('script');
+          s.async = true;
+          s.src = 'https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6063172558757532';
+          s.crossOrigin = 'anonymous';
+          document.head.appendChild(s);
+        }
+      })();
+    </script>
 
     <style>
       * { box-sizing: border-box; margin: 0; padding: 0; }
